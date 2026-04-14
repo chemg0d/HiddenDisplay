@@ -1,0 +1,296 @@
+================================================================
+HIDDENDISPLAY — PROJECT FLOW DOCUMENTATION (ENGLISH)
+Last Updated: 2026-04-13
+================================================================
+
+TABLE OF CONTENTS
+  1. Overview
+  2. Main Features
+  3. Launch Flow (Play VALORANT button)
+  4. True Stretch Flow
+  5. Mod Injection & Anti-Ban Cleanup
+  6. Auto-Revert on Game Exit
+  7. Config Management
+  8. File Structure
+  9. Security & Risk Summary
+
+
+================================================================
+1. OVERVIEW
+================================================================
+
+HiddenDisplay is a companion tool for VALORANT that provides:
+  - Blood/corpse mod injection
+  - VNG logo removal
+  - True Stretch (custom stretched resolution)
+  - FPS optimization
+  - Low graphics preset
+
+It works by launching VALORANT through the Riot Client local API
+(simulating the Play button click), injecting/modifying files at
+the right moment, and cleaning up safely after the game closes.
+
+
+================================================================
+2. MAIN FEATURES
+================================================================
+
+A. Blood Mod
+   - Copies MatureData-WindowsClient.pak/.sig/.ucas/.utoc
+     into VALORANT's Paks folder during launch
+   - Allows Show Mature Content to work on VNG VALORANT
+     (which doesn't ship with these files by default)
+
+B. VNG Logo Removal
+   - Deletes VNGLogo-WindowsClient.* from Paks folder at launch
+   - Restores originals when game closes (anti-ban)
+
+C. True Stretch
+   - 4:3 resolution presets: 1440x1080, 1280x960, 1024x768
+   - Custom resolution option with saved values
+   - NVIDIA scaling set to Full-screen via registry
+   - Desktop resolution change via Win32 API
+   - Auto-detects unsupported resolutions, opens NVCP tutorial
+
+D. FPS Optimization
+   - Registry tweaks (Ultimate Performance, disable Game Bar,
+     Nagle's algorithm, Prefetch/Superfetch, etc.)
+   - Creates Windows Restore Point before applying
+
+E. Low Graphics Preset
+   - Replaces GameUserSettings.ini with pre-configured low-quality preset
+   - Applied to all VALORANT accounts
+
+
+================================================================
+3. LAUNCH FLOW (Play VALORANT Button)
+================================================================
+
+User clicks Play VALORANT:
+
+STEP 1: Save config
+  - Save current mod checkbox states (blood, vng) to config.json
+
+STEP 2: Auto re-apply stretch (if previously set)
+  - Read last_resolution from config.json
+  - If set, write stretch values to GameUserSettings.ini
+    (no read-only lock — allows in-game settings to save)
+
+STEP 3: No mods mode (if both checkboxes unchecked)
+  - Just launch Riot Client directly
+  - Spawn stretch revert watcher (if stretch active)
+  - Exit
+
+STEP 4: Find Riot Client
+  - Checks common paths, registry, running processes
+  - Falls back to custom user-specified path
+
+STEP 5: Kill existing Riot Client processes
+  - Ensures clean launch with --launch-product args
+  - Deletes stale lockfile
+
+STEP 6: Launch Riot Client
+  - cmd /c start RiotClientServices.exe --launch-product=valorant --launch-patchline=live
+
+STEP 7: Wait for Riot Client API ready
+  - Poll for lockfile appearance (up to 15 seconds)
+  - Poll API endpoint /riotclient/region-locale for response (up to 20 seconds)
+
+STEP 8: Trigger Play via API
+  - Read port + password from lockfile
+  - POST to /product-launcher/v1/products/valorant/patchlines/live
+  - Retry 3 times with 1-second gaps
+
+STEP 9: Wait for VALORANT process
+  - Poll every 50ms for VALORANT-Win64-Shipping.exe
+  - Timeout: 5 minutes
+
+STEP 10: Race inject mods (critical timing)
+  - Create .originals_backup folder
+  - For each blood file: backup original if exists, then copy mod file
+  - For each VNG file: backup original, then delete
+  - Typically completes in <50ms
+
+STEP 11: Spawn cleanup watcher (background thread)
+  - Waits for VALORANT to exit
+  - Restores VNG files from backup (anti-ban)
+  - For blood files with no backup (VNG VALORANT): LEAVE them in place
+    so Show Mature Content continues to work
+
+STEP 12: Spawn stretch revert watcher (if stretch active)
+  - Waits for VALORANT to exit
+  - Restores desktop resolution to native (only)
+  - Does NOT touch config files (preserves user changes)
+
+
+================================================================
+4. TRUE STRETCH FLOW
+================================================================
+
+WHEN USER CLICKS APPLY STRETCH:
+
+STEP 1: Determine target resolution
+  - If preset: use w/h from STRETCH_RESOLUTIONS dict
+  - If custom: read W/H from input fields
+
+STEP 2: Save native resolution
+  - Used for auto-revert later
+
+STEP 3: Check if resolution is supported
+  - Call EnumDisplaySettings to list supported modes
+  - If target not in list → show NVCP tutorial popup (9-step guide)
+    with button to open NVIDIA Control Panel
+
+STEP 4: Set NVIDIA scaling to Full-screen (requires admin)
+  - Registry: HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration\...
+  - Set Scaling=3 (Full-screen)
+
+STEP 5: Change desktop resolution
+  - Win32 ChangeDisplaySettingsEx
+  - Multiple flag attempts for compatibility
+
+STEP 6: Modify game configs
+  - Account/WindowsClient/GameUserSettings.ini:
+    - ResolutionSizeX/Y = target
+    - LastUserConfirmedResolutionSizeX/Y = target
+    - FullscreenMode=2 (inserted after HDRDisplayOutputNits)
+    - LastConfirmedFullscreenMode=0, PreferredFullscreenMode=0
+    - bShouldLetterbox=False, bLastConfirmedShouldLetterbox=False
+    - NOT set to read-only (preserves in-game setting saves)
+  - Account/Windows/RiotUserSettings.ini:
+    - Graphics quality overrides (MaterialQuality=0, etc.)
+    - NOT set to read-only
+  - Global WindowsClient/GameUserSettings.ini:
+    - Same resolution + letterbox changes
+
+STEP 7: Save to config.json
+  - last_resolution = preset key or 'custom'
+  - custom_width/height if custom
+
+
+================================================================
+5. MOD INJECTION & ANTI-BAN CLEANUP
+================================================================
+
+The cleanup watcher handles the ban-risk files:
+
+  Blood files (MatureData-*):
+    - If backup exists (file existed before we modified it)
+      → restore original on game exit
+    - If no backup (VNG VALORANT, file didn't exist originally)
+      → leave our file in place (Vanguard doesn't ban for ADDED files,
+        only for MODIFIED existing Riot files)
+
+  VNG logo files (VNGLogo-*):
+    - Always restore from backup on game exit
+    - Prevents 1-hour ban from missing shipped files
+
+Emergency cleanup:
+  - Fires when HD window is closed
+  - Restores all files from .originals_backup
+  - Safety net if user force-closes HD mid-session
+
+
+================================================================
+6. AUTO-REVERT ON GAME EXIT
+================================================================
+
+Two separate watcher threads run on game exit:
+
+Watcher A: Blood/VNG cleanup (from mod injection)
+  - Location: game_launcher.py → _cleanup_watcher()
+  - Handles pak file restoration
+
+Watcher B: Stretch auto-revert (new)
+  - Location: main_window.py → _stretch_revert_watcher()
+  - Waits for VALORANT to exit
+  - Calls auto_revert_on_exit() which:
+    → Restores desktop resolution to native
+    → Does NOT restore config files (preserves user changes!)
+
+Why split into two functions:
+  - auto_revert_on_exit() is LIGHTWEIGHT for game exit
+  - revert_stretch() is FULL revert for manual Revert button
+
+This split fixes the "Show Mature Content" loop:
+  - If auto-revert restored config files from .stretch_backup,
+    it would wipe any in-game setting changes
+  - By NOT restoring config, any mature content flag the game saved
+    during the session stays in the file
+  - Next Play click re-applies stretch keys but preserves all others
+
+
+================================================================
+7. CONFIG MANAGEMENT
+================================================================
+
+config.json (next to HiddenDisplay.exe) stores:
+
+  {
+    "game_path": "",              // VALORANT install path (empty = auto-detect)
+    "riot_client_path": "",       // Riot Client path (empty = auto-detect)
+    "enable_blood": true,         // Blood mod checkbox state
+    "enable_vng_remove": true,    // VNG logo removal checkbox state
+    "minimize_to_tray": true,     // Future use
+    "language": "en",             // UI language (en/vi)
+    "custom_width": "",           // Last custom resolution W
+    "custom_height": "",          // Last custom resolution H
+    "last_resolution": ""         // Last applied stretch preset or 'custom'
+  }
+
+On first run:
+  - config.json is created with default values
+  - User settings persist across launches
+
+
+================================================================
+8. FILE STRUCTURE
+================================================================
+
+HiddenDisplay/
+├── HiddenDisplay.exe            Main application
+├── config.json                  User preferences (auto-created)
+├── blood/                       Blood mod pak files
+│   ├── MatureData-WindowsClient.pak
+│   ├── MatureData-WindowsClient.sig
+│   ├── MatureData-WindowsClient.ucas
+│   └── MatureData-WindowsClient.utoc
+├── .originals_backup/           Temp backup of originals during session
+└── .stretch_backup suffix       Appended to config files to backup pre-stretch state
+
+
+================================================================
+9. SECURITY & RISK SUMMARY
+================================================================
+
+Ban risk breakdown:
+
+  Blood mod only (VNG user):
+    - Adds files that don't normally exist
+    - Vanguard verifies shipped file checksums, not "extra files"
+    - Very low risk — VrC-Support has done this for years safely
+
+  Blood mod only (non-VNG user):
+    - Modifies existing Riot files (MatureData pak exists)
+    - Cleanup watcher restores original on game exit
+    - Very low risk — original restored before Vanguard can scan
+
+  VNG logo removal:
+    - Deletes shipped Riot files (missing = integrity failure)
+    - Cleanup watcher restores originals on game exit
+    - LOW risk during gameplay (small window for ban scans)
+    - Risk if HD crashes or is force-killed before cleanup runs
+
+  True Stretch:
+    - Modifies user config files only (not game files)
+    - No Vanguard ban risk — these files are user-editable
+    - Registry changes are user-scoped
+
+Mitigation:
+  - Emergency cleanup on HD window close
+  - Daemon threads die cleanly on process exit
+  - Files backed up before any modification
+
+================================================================
+END OF DOCUMENTATION
+================================================================

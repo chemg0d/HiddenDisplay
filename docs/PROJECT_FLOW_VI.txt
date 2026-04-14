@@ -1,0 +1,296 @@
+================================================================
+HIDDENDISPLAY — TÀI LIỆU LUỒNG HOẠT ĐỘNG (TIẾNG VIỆT)
+Cập nhật lần cuối: 13-04-2026
+================================================================
+
+MỤC LỤC
+  1. Tổng quan
+  2. Các tính năng chính
+  3. Luồng khởi động (Nút Play VALORANT)
+  4. Luồng True Stretch
+  5. Inject Mod và dọn dẹp chống ban
+  6. Tự động hoàn tác khi thoát game
+  7. Quản lý Config
+  8. Cấu trúc file
+  9. Tóm tắt bảo mật và rủi ro
+
+
+================================================================
+1. TỔNG QUAN
+================================================================
+
+HiddenDisplay là công cụ hỗ trợ cho VALORANT, cung cấp:
+  - Inject mod máu/xác
+  - Xóa logo VNG
+  - True Stretch (độ phân giải kéo giãn tùy chỉnh)
+  - Tối ưu FPS
+  - Preset đồ họa thấp
+
+Hoạt động bằng cách khởi động VALORANT qua Riot Client local API
+(giả lập click nút Play), inject/chỉnh sửa file vào đúng thời điểm,
+và dọn dẹp an toàn sau khi game đóng.
+
+
+================================================================
+2. CÁC TÍNH NĂNG CHÍNH
+================================================================
+
+A. Mod Máu
+   - Copy MatureData-WindowsClient.pak/.sig/.ucas/.utoc
+     vào thư mục Paks của VALORANT khi khởi động
+   - Cho phép Show Mature Content hoạt động trên VALORANT VNG
+     (bản VNG không có sẵn các file này)
+
+B. Xóa Logo VNG
+   - Xóa VNGLogo-WindowsClient.* khỏi thư mục Paks khi khởi động
+   - Khôi phục lại khi game đóng (chống ban)
+
+C. True Stretch
+   - Preset độ phân giải 4:3: 1440x1080, 1280x960, 1024x768
+   - Tùy chọn độ phân giải tùy chỉnh có lưu giá trị
+   - Đặt NVIDIA scaling thành Full-screen qua registry
+   - Đổi độ phân giải desktop qua Win32 API
+   - Tự phát hiện resolution không hỗ trợ, mở hướng dẫn NVCP
+
+D. Tối ưu FPS
+   - Chỉnh registry (Ultimate Performance, tắt Game Bar,
+     Nagle's algorithm, Prefetch/Superfetch, v.v.)
+   - Tạo Windows Restore Point trước khi áp dụng
+
+E. Preset đồ họa thấp
+   - Thay GameUserSettings.ini bằng preset chất lượng thấp
+   - Áp dụng cho mọi tài khoản VALORANT
+
+
+================================================================
+3. LUỒNG KHỞI ĐỘNG (Nút Play VALORANT)
+================================================================
+
+Người dùng click Play VALORANT:
+
+BƯỚC 1: Lưu config
+  - Lưu trạng thái checkbox mod (blood, vng) vào config.json
+
+BƯỚC 2: Tự động áp dụng lại stretch (nếu đã từng áp dụng)
+  - Đọc last_resolution từ config.json
+  - Nếu có, ghi giá trị stretch vào GameUserSettings.ini
+    (không khóa read-only — cho phép game lưu cài đặt trong game)
+
+BƯỚC 3: Chế độ không mod (nếu cả 2 checkbox tắt)
+  - Chỉ khởi động Riot Client trực tiếp
+  - Spawn stretch revert watcher (nếu stretch đang bật)
+  - Thoát
+
+BƯỚC 4: Tìm Riot Client
+  - Kiểm tra các đường dẫn thông dụng, registry, process đang chạy
+  - Dự phòng: đường dẫn tùy chỉnh do người dùng cung cấp
+
+BƯỚC 5: Tắt các process Riot Client đang chạy
+  - Đảm bảo khởi động sạch với tham số --launch-product
+  - Xóa lockfile cũ
+
+BƯỚC 6: Khởi động Riot Client
+  - cmd /c start RiotClientServices.exe --launch-product=valorant --launch-patchline=live
+
+BƯỚC 7: Đợi Riot Client API sẵn sàng
+  - Poll chờ lockfile xuất hiện (tối đa 15 giây)
+  - Poll API endpoint /riotclient/region-locale để kiểm tra (tối đa 20 giây)
+
+BƯỚC 8: Kích hoạt Play qua API
+  - Đọc port + password từ lockfile
+  - POST tới /product-launcher/v1/products/valorant/patchlines/live
+  - Thử lại 3 lần, cách nhau 1 giây
+
+BƯỚC 9: Đợi process VALORANT
+  - Poll mỗi 50ms tìm VALORANT-Win64-Shipping.exe
+  - Timeout: 5 phút
+
+BƯỚC 10: Inject mod tức thì (thời điểm quan trọng)
+  - Tạo thư mục .originals_backup
+  - Với mỗi file blood: backup bản gốc nếu có, rồi copy file mod
+  - Với mỗi file VNG: backup bản gốc, rồi xóa
+  - Thường hoàn tất trong <50ms
+
+BƯỚC 11: Spawn cleanup watcher (thread nền)
+  - Đợi VALORANT thoát
+  - Khôi phục file VNG từ backup (chống ban)
+  - Với file blood không có backup (VNG VALORANT): GIỮ NGUYÊN
+    để Show Mature Content vẫn hoạt động
+
+BƯỚC 12: Spawn stretch revert watcher (nếu stretch đang bật)
+  - Đợi VALORANT thoát
+  - Khôi phục độ phân giải desktop về gốc (chỉ vậy thôi)
+  - KHÔNG chạm vào file config (giữ lại thay đổi của người dùng)
+
+
+================================================================
+4. LUỒNG TRUE STRETCH
+================================================================
+
+KHI NGƯỜI DÙNG CLICK APPLY STRETCH:
+
+BƯỚC 1: Xác định độ phân giải đích
+  - Nếu preset: dùng w/h từ dict STRETCH_RESOLUTIONS
+  - Nếu custom: đọc W/H từ ô input
+
+BƯỚC 2: Lưu độ phân giải gốc
+  - Dùng cho auto-revert sau này
+
+BƯỚC 3: Kiểm tra độ phân giải có được hỗ trợ không
+  - Gọi EnumDisplaySettings để liệt kê các mode hỗ trợ
+  - Nếu đích không có trong list → hiện popup hướng dẫn NVCP
+    (hướng dẫn 9 bước) với nút mở NVIDIA Control Panel
+
+BƯỚC 4: Đặt NVIDIA scaling thành Full-screen (cần admin)
+  - Registry: HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration\...
+  - Đặt Scaling=3 (Full-screen)
+
+BƯỚC 5: Đổi độ phân giải desktop
+  - Win32 ChangeDisplaySettingsEx
+  - Thử nhiều flag để tương thích
+
+BƯỚC 6: Chỉnh config game
+  - Account/WindowsClient/GameUserSettings.ini:
+    - ResolutionSizeX/Y = đích
+    - LastUserConfirmedResolutionSizeX/Y = đích
+    - FullscreenMode=2 (chèn sau HDRDisplayOutputNits)
+    - LastConfirmedFullscreenMode=0, PreferredFullscreenMode=0
+    - bShouldLetterbox=False, bLastConfirmedShouldLetterbox=False
+    - KHÔNG đặt read-only (để game có thể lưu cài đặt trong game)
+  - Account/Windows/RiotUserSettings.ini:
+    - Ghi đè các cài đặt chất lượng đồ họa (MaterialQuality=0, v.v.)
+    - KHÔNG đặt read-only
+  - Global WindowsClient/GameUserSettings.ini:
+    - Cùng thay đổi độ phân giải + letterbox
+
+BƯỚC 7: Lưu vào config.json
+  - last_resolution = key preset hoặc 'custom'
+  - custom_width/height nếu là custom
+
+
+================================================================
+5. INJECT MOD & DỌN DẸP CHỐNG BAN
+================================================================
+
+Cleanup watcher xử lý các file có rủi ro ban:
+
+  File blood (MatureData-*):
+    - Nếu có backup (file tồn tại trước khi chỉnh sửa)
+      → khôi phục bản gốc khi game thoát
+    - Nếu không có backup (VNG VALORANT, file không tồn tại ban đầu)
+      → giữ lại file của ta (Vanguard không ban vì file THÊM VÀO,
+        chỉ ban nếu CHỈNH SỬA file gốc của Riot)
+
+  File logo VNG (VNGLogo-*):
+    - Luôn khôi phục từ backup khi game thoát
+    - Ngăn ban 1 giờ do thiếu file gốc
+
+Dọn dẹp khẩn cấp:
+  - Kích hoạt khi cửa sổ HD đóng
+  - Khôi phục tất cả file từ .originals_backup
+  - Lưới an toàn khi người dùng force-close HD giữa session
+
+
+================================================================
+6. TỰ ĐỘNG HOÀN TÁC KHI THOÁT GAME
+================================================================
+
+Hai watcher thread riêng biệt chạy khi game thoát:
+
+Watcher A: Dọn dẹp blood/VNG (từ mod injection)
+  - Vị trí: game_launcher.py → _cleanup_watcher()
+  - Xử lý khôi phục file pak
+
+Watcher B: Auto-revert stretch (mới)
+  - Vị trí: main_window.py → _stretch_revert_watcher()
+  - Đợi VALORANT thoát
+  - Gọi auto_revert_on_exit() mà:
+    → Khôi phục độ phân giải desktop về gốc
+    → KHÔNG khôi phục file config (giữ thay đổi của người dùng!)
+
+Lý do tách làm 2 hàm:
+  - auto_revert_on_exit() NHẸ cho việc thoát game
+  - revert_stretch() FULL revert cho nút Revert thủ công
+
+Việc tách này giải quyết lỗi loop "Show Mature Content":
+  - Nếu auto-revert khôi phục config từ .stretch_backup,
+    nó sẽ xóa mọi thay đổi trong game
+  - Bằng cách KHÔNG khôi phục config, cờ mature content game lưu
+    trong session sẽ vẫn ở trong file
+  - Lần Play tiếp theo sẽ áp dụng lại stretch keys nhưng giữ các key khác
+
+
+================================================================
+7. QUẢN LÝ CONFIG
+================================================================
+
+config.json (cùng thư mục với HiddenDisplay.exe) lưu:
+
+  {
+    "game_path": "",              // Đường dẫn VALORANT (rỗng = tự động)
+    "riot_client_path": "",       // Đường dẫn Riot Client (rỗng = tự động)
+    "enable_blood": true,         // Trạng thái checkbox mod máu
+    "enable_vng_remove": true,    // Trạng thái checkbox xóa VNG logo
+    "minimize_to_tray": true,     // Dùng trong tương lai
+    "language": "en",             // Ngôn ngữ UI (en/vi)
+    "custom_width": "",           // W độ phân giải custom cuối cùng
+    "custom_height": "",          // H độ phân giải custom cuối cùng
+    "last_resolution": ""         // Preset stretch cuối cùng hoặc 'custom'
+  }
+
+Lần chạy đầu:
+  - config.json được tạo với giá trị mặc định
+  - Cài đặt người dùng được giữ qua các lần chạy
+
+
+================================================================
+8. CẤU TRÚC FILE
+================================================================
+
+HiddenDisplay/
+├── HiddenDisplay.exe            App chính
+├── config.json                  Cài đặt người dùng (tự tạo)
+├── blood/                       File pak mod máu
+│   ├── MatureData-WindowsClient.pak
+│   ├── MatureData-WindowsClient.sig
+│   ├── MatureData-WindowsClient.ucas
+│   └── MatureData-WindowsClient.utoc
+├── .originals_backup/           Backup tạm của file gốc trong session
+└── Suffix .stretch_backup       Thêm vào file config để backup trạng thái trước stretch
+
+
+================================================================
+9. TÓM TẮT BẢO MẬT VÀ RỦI RO
+================================================================
+
+Phân tích rủi ro ban:
+
+  Chỉ dùng mod máu (người dùng VNG):
+    - Thêm file không tồn tại bình thường
+    - Vanguard xác thực checksum file gốc, không phải "file dư"
+    - Rủi ro rất thấp — VrC-Support đã làm thế nhiều năm an toàn
+
+  Chỉ dùng mod máu (người dùng không VNG):
+    - Chỉnh sửa file Riot gốc (MatureData pak tồn tại)
+    - Cleanup watcher khôi phục gốc khi game thoát
+    - Rủi ro rất thấp — gốc được khôi phục trước khi Vanguard scan
+
+  Xóa logo VNG:
+    - Xóa file Riot gốc (thiếu = lỗi integrity)
+    - Cleanup watcher khôi phục bản gốc khi game thoát
+    - Rủi ro THẤP khi đang chơi (cửa sổ ban scan nhỏ)
+    - Rủi ro nếu HD crash hoặc bị force-kill trước khi cleanup chạy
+
+  True Stretch:
+    - Chỉ chỉnh file config của người dùng (không phải file game)
+    - Không có rủi ro ban từ Vanguard — đây là file người dùng có thể sửa
+    - Thay đổi registry ở phạm vi người dùng
+
+Giảm thiểu rủi ro:
+  - Dọn dẹp khẩn cấp khi cửa sổ HD đóng
+  - Daemon thread tự thoát sạch khi process exit
+  - File được backup trước khi chỉnh sửa
+
+================================================================
+HẾT TÀI LIỆU
+================================================================
