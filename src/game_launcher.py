@@ -74,14 +74,14 @@ def _cleanup_watcher(paks_dir, backup_dir, injected_blood, deleted_vng, log_func
         backup_path = os.path.join(backup_dir, fname)
         try:
             if os.path.exists(backup_path):
-                # Original existed — restore it to avoid ban from modified files
+                # Original existed — restore it
                 shutil.copy2(backup_path, game_path)
                 os.remove(backup_path)
                 restored += 1
-            # Note: if no backup exists, the file didn't originally ship with
-            # the game (e.g., VNG VALORANT doesn't ship with MatureData).
-            # Leave our file in place so Show Mature Content works in-game.
-            # Adding missing files doesn't trigger ban (only modifying existing ones does).
+            elif os.path.exists(game_path):
+                # No original existed — remove our injected file to keep Paks clean
+                os.remove(game_path)
+                removed += 1
         except Exception as e:
             log(f"  Error restoring {fname}: {e}")
 
@@ -132,13 +132,14 @@ def emergency_cleanup(paks_dir=None):
             except Exception:
                 pass
 
-        # Also remove any blood files we injected that didn't have backups
+        # Remove any blood files we injected that didn't have backups
         for fname in BLOOD_FILES:
             game_path = os.path.join(paks_dir, fname)
             if os.path.exists(game_path) and not os.path.exists(os.path.join(backup_dir, fname)):
-                # Check if it's OUR version (matches blood folder)
-                # Skip — can't easily tell, leave it alone
-                pass
+                try:
+                    os.remove(game_path)
+                except Exception:
+                    pass
 
         if os.path.exists(backup_dir) and not os.listdir(backup_dir):
             os.rmdir(backup_dir)

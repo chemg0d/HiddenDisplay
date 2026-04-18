@@ -5,9 +5,10 @@ import datetime
 import threading
 import customtkinter as ctk
 
+from PIL import Image
+
 try:
     import pystray
-    from PIL import Image
     TRAY_AVAILABLE = True
 except ImportError:
     TRAY_AVAILABLE = False
@@ -142,6 +143,7 @@ class MainWindow(ctk.CTk):
         self.lang = self.config.get('language', 'en')
         self.launch_worker = None
         self.stretch_active = False
+        self.stretch_linked = False
         self.native_w, self.native_h = 0, 0
         self.tray_icon = None
         self._build_ui()
@@ -384,7 +386,8 @@ class MainWindow(ctk.CTk):
         self.opt_btn = ctk.CTkButton(fps_row, text=self.t('optimize'), width=90, height=32,
                                       fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
                                       font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                      command=self._optimize_fps)
+                                      command=self._optimize_fps,
+                                      state="disabled")
         self.opt_btn.pack(side="right")
 
         # Separator
@@ -402,13 +405,15 @@ class MainWindow(ctk.CTk):
         self.restore_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('restore'), width=90, height=32,
                                               fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
                                               font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                              command=self._restore_graphics)
+                                              command=self._restore_graphics,
+                                              state="disabled")
         self.restore_gfx_btn.pack(side="right", padx=(6, 0))
 
         self.apply_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('apply_low'), width=90, height=32,
                                             fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
                                             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                            command=self._apply_graphics)
+                                            command=self._apply_graphics,
+                                            state="disabled")
         self.apply_gfx_btn.pack(side="right")
 
         # ── True Stretch ──
@@ -428,11 +433,27 @@ class MainWindow(ctk.CTk):
         self.res_label.pack(side="left")
 
         self._res_options = self._build_res_options()
+
         self.res_menu = ctk.CTkOptionMenu(
             res_row, values=self._res_options, width=240, height=30,
             fg_color=GRAY_BTN, button_color=GRAY_BTN, button_hover_color=GRAY_HOVER,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             command=self._on_res_change)
+        self.res_menu.pack(side="right")
+
+        # Link icon — toggles whether stretch is applied when pressing Play
+        link_icon_path = os.path.join(BIN_DIR, 'link.png')
+        self._link_img = ctk.CTkImage(
+            light_image=Image.open(link_icon_path),
+            dark_image=Image.open(link_icon_path),
+            size=(16, 16))
+        self.link_btn = ctk.CTkButton(
+            res_row, image=self._link_img, text="",
+            width=30, height=30,
+            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
+            corner_radius=6,
+            command=self._toggle_stretch_link)
+        self.link_btn.pack(side="right", padx=(0, 6))
         # Restore last used resolution
         last_res = self.config.get('last_resolution', '')
         initial_option = self._res_options[0]
@@ -444,7 +465,6 @@ class MainWindow(ctk.CTk):
                     initial_option = opt
                     break
         self.res_menu.set(initial_option)
-        self.res_menu.pack(side="right")
 
         # Custom resolution input (hidden by default)
         self.custom_res_frame = ctk.CTkFrame(stretch_frame, fg_color="transparent")
@@ -605,21 +625,26 @@ class MainWindow(ctk.CTk):
         self.config['enable_vng_remove'] = self.chk_vng.get() == 1
         save_config(self.config)
 
-        # Auto re-apply stretch if previously applied
-        last_res = self.config.get('last_resolution', '')
-        if last_res:
-            self._log("Re-applying stretch settings...")
+        # Apply stretch only if user linked stretch to Play
+        if self.stretch_linked:
+            res_key = self._get_selected_resolution_key()
             custom_w, custom_h = 0, 0
-            if last_res == 'custom':
+            if res_key == 'custom':
                 try:
                     custom_w = int(self.config.get('custom_width', '0'))
                     custom_h = int(self.config.get('custom_height', '0'))
                 except ValueError:
                     pass
+            self._log(f"Applying stretch ({res_key})...")
             try:
-                apply_stretch(last_res, self._log, custom_w, custom_h)
+                ok, nw, nh = apply_stretch(res_key, self._log, custom_w, custom_h)
+                if ok and ok != "needs_custom_res":
+                    self.native_w, self.native_h = nw, nh
+                    self.stretch_active = True
+                    self.config['last_resolution'] = res_key
+                    save_config(self.config)
             except Exception as e:
-                self._log(f"Stretch re-apply error: {e}")
+                self._log(f"Stretch error: {e}")
 
         paks_dir = self._get_paks_dir()
         custom_riot = self.config.get('riot_client_path', '')
@@ -632,8 +657,8 @@ class MainWindow(ctk.CTk):
                     f'cmd /c start "" "{riot_exe}" --launch-product=valorant --launch-patchline=live',
                     shell=True, creationflags=0x08000000)
                 self._log(self.t('no_mods'))
-                # Spawn stretch revert watcher even in no-mods mode
-                if last_res:
+                # Spawn stretch revert watcher if stretch was linked
+                if self.stretch_linked and self.stretch_active:
                     revert_thread = threading.Thread(
                         target=self._stretch_revert_watcher,
                         daemon=True
@@ -663,8 +688,8 @@ class MainWindow(ctk.CTk):
             on_err=lambda err: self.after(0, self._on_launch_err, err))
         self.launch_worker.start()
 
-        # Spawn stretch revert watcher if stretch was applied
-        if last_res:
+        # Spawn stretch revert watcher if stretch was linked and applied
+        if self.stretch_linked and self.stretch_active:
             revert_thread = threading.Thread(
                 target=self._stretch_revert_watcher,
                 daemon=True
@@ -774,6 +799,16 @@ class MainWindow(ctk.CTk):
             else:
                 options.append(f"{v['label']}  —  {v['desc']}")
         return options
+
+    def _toggle_stretch_link(self):
+        """Toggle whether stretch is linked to Play button."""
+        self.stretch_linked = not self.stretch_linked
+        if self.stretch_linked:
+            self.link_btn.configure(fg_color=BLUE, hover_color=BLUE_HOVER)
+            self._log("Stretch linked — will apply when you press Play")
+        else:
+            self.link_btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
+            self._log("Stretch unlinked — Play will only apply mods")
 
     def _on_res_change(self, choice):
         """Show/hide custom resolution input based on dropdown selection."""

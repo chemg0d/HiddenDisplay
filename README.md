@@ -44,7 +44,7 @@ Chi tiết đầy đủ: xem `docs/PROJECT_FLOW_VI.txt`.
 
 ```bash
 # Clone repo
-git clone https://github.com/chemg0d/HiddenDisplay.git
+git clone <repo-url>
 cd HiddenDisplay
 
 # Cài dependency

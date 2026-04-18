@@ -4,6 +4,8 @@ import ctypes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+MUTEX_NAME = "Global\\HiddenDisplay_SingleInstance"
+
 
 def is_admin():
     try:
@@ -27,14 +29,37 @@ def run_as_admin():
     sys.exit(0)
 
 
+def acquire_single_instance():
+    """Create a named mutex to ensure only one instance runs at a time."""
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, True, MUTEX_NAME)
+    last_error = ctypes.windll.kernel32.GetLastError()
+    # ERROR_ALREADY_EXISTS = 183
+    if last_error == 183:
+        ctypes.windll.kernel32.CloseHandle(mutex)
+        return None
+    return mutex
+
+
 def main():
     if not is_admin():
         run_as_admin()
         return
 
+    mutex = acquire_single_instance()
+    if mutex is None:
+        # Another instance is already running
+        ctypes.windll.user32.MessageBoxW(
+            None, "HiddenDisplay is already running in the tray.",
+            "HiddenDisplay", 0x40)
+        sys.exit(0)
+
     from src.main_window import MainWindow
     app = MainWindow()
     app.mainloop()
+
+    # Release mutex on exit
+    ctypes.windll.kernel32.ReleaseMutex(mutex)
+    ctypes.windll.kernel32.CloseHandle(mutex)
 
 
 if __name__ == '__main__':
