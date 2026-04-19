@@ -64,6 +64,12 @@ jobs:
           git tag "v${{ env.VERSION }}"
           git push origin "v${{ env.VERSION }}"
 
+      - name: Zip Release
+        if: steps.check_tag.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/HiddenDisplay -DestinationPath "dist/HiddenDisplay-v${{ env.VERSION }}.zip"
+
       - name: Create Release
         if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
@@ -72,7 +78,7 @@ jobs:
           name: HiddenDisplay v${{ env.VERSION }}
           draft: false
           prerelease: false
-          files: dist/HiddenDisplay.exe
+          files: dist/HiddenDisplay-v${{ env.VERSION }}.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
