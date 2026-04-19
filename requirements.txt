@@ -1,4 +1,7 @@
-PyQt5>=5.15.0
+customtkinter>=5.2.0
+darkdetect>=0.8.0
+Pillow>=10.0.0
+pystray>=0.19.5
 psutil>=5.9.0
 pywin32>=306
 pycaw>=20230407
