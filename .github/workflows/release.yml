@@ -50,9 +50,8 @@ jobs:
         id: check_tag
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          git rev-parse "v${{ env.VERSION }}" 2>$null
-          if ($LASTEXITCODE -eq 0) {
+          $tag_exists = git tag -l "v${{ env.VERSION }}"
+          if ($tag_exists) {
             echo "exists=true" >> $env:GITHUB_OUTPUT
           } else {
             echo "exists=false" >> $env:GITHUB_OUTPUT

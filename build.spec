@@ -25,8 +25,6 @@ a = Analysis(
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
         'qfluentwidgets',
-        'PIL',
-        'PIL.Image',
     ],
     hookspath=[],
     hooksconfig={},

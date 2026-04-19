@@ -8,6 +8,8 @@ __pycache__/
 
 # Distribution / packaging
 bin/GameUserSettings.ini
+public/
+build/
 bin/GameUserSettings.ini.original
 build/
 develop-eggs/

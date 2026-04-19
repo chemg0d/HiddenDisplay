@@ -2,23 +2,20 @@ import os
 import sys
 import time
 import datetime
-import threading
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QIcon, QFont, QColor, QPalette
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFileDialog, QSystemTrayIcon, QMenu, QSizePolicy, QScrollArea, QFrame,
-    QSplitter
+    QFileDialog, QSystemTrayIcon, QMenu, QScrollArea, QFrame
 )
 
 try:
     from qfluentwidgets import (
         PushButton, PrimaryPushButton, CheckBox, LineEdit, ComboBox,
-        TextEdit, CardWidget, TitleLabel, CaptionLabel, SubtitleLabel,
+        TextEdit, CardWidget, TitleLabel, CaptionLabel,
         BodyLabel, StrongBodyLabel, InfoBar, InfoBarPosition,
-        setTheme, Theme, FluentIcon, ToolButton, ScrollArea,
-        SmoothScrollArea
+        setTheme, Theme, ToolButton
     )
     FLUENT_AVAILABLE = True
 except ImportError:
@@ -30,7 +27,7 @@ from src.graphics_preset import apply_low_preset, restore_settings
 from src.game_launcher import GameLaunchWorker, find_riot_client, emergency_cleanup, is_game_running
 from src.stretch import (
     STRETCH_RESOLUTIONS, apply_stretch, revert_stretch, auto_revert_on_exit,
-    get_native_resolution, is_resolution_supported, open_nvidia_control_panel
+    open_nvidia_control_panel
 )
 
 APP_VERSION = "4.0.0"
