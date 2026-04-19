@@ -53,13 +53,19 @@ def main():
             "HiddenDisplay", 0x40)
         sys.exit(0)
 
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication(sys.argv)
+
     from src.main_window import MainWindow
-    app = MainWindow()
-    app.mainloop()
+    window = MainWindow()
+    window.show()
+    exit_code = app.exec()
 
     # Release mutex on exit
     ctypes.windll.kernel32.ReleaseMutex(mutex)
     ctypes.windll.kernel32.CloseHandle(mutex)
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':

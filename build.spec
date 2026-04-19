@@ -1,11 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-import customtkinter
 
 block_cipher = None
 base_dir = os.path.dirname(os.path.abspath(SPEC))
-ctk_path = os.path.dirname(customtkinter.__file__)
 
 a = Analysis(
     ['main.py'],
@@ -14,7 +12,6 @@ a = Analysis(
     datas=[
         ('bin', 'bin'),
         ('blood', 'blood'),
-        (ctk_path, 'customtkinter'),
     ],
     hiddenimports=[
         'pycaw',
@@ -23,10 +20,11 @@ a = Analysis(
         'psutil',
         'win32api',
         'win32con',
-        'customtkinter',
-        'darkdetect',
-        'pystray',
-        'pystray._win32',
+        'PyQt6',
+        'PyQt6.QtCore',
+        'PyQt6.QtGui',
+        'PyQt6.QtWidgets',
+        'qfluentwidgets',
         'PIL',
         'PIL.Image',
     ],

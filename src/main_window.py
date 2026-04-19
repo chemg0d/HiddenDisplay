@@ -3,15 +3,23 @@ import sys
 import time
 import datetime
 import threading
-import customtkinter as ctk
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
+from PyQt6.QtGui import QIcon, QFont, QColor
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QFileDialog, QSystemTrayIcon, QMenu, QFrame, QMessageBox,
+    QSizePolicy
+)
+
+from qfluentwidgets import (
+    PushButton, PrimaryPushButton, CheckBox, LineEdit, ComboBox,
+    TextEdit, CardWidget, TitleLabel, CaptionLabel,
+    BodyLabel, StrongBodyLabel, InfoBar, InfoBarPosition,
+    setTheme, Theme
+)
 
 from PIL import Image
-
-try:
-    import pystray
-    TRAY_AVAILABLE = True
-except ImportError:
-    TRAY_AVAILABLE = False
 
 from src.config import load_config, save_config, BIN_DIR
 from src.fps_optimizer import run_all_optimizations, is_admin, create_restore_point
@@ -25,46 +33,25 @@ from src.stretch import (
 APP_VERSION = "4.0.0"
 APP_NAME = "HiddenDisplay"
 
-
-def _get_base_dir():
-    if getattr(sys, 'frozen', False):
-        return sys._MEIPASS
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-BASE_DIR = _get_base_dir()
-BLOOD_DIR = os.path.join(BASE_DIR, 'blood')
-DEFAULT_PAKS_DIR = r'C:\Riot Games\VALORANT\live\ShooterGame\Content\Paks'
-
-# Colors
-BLUE = "#3b82f6"
-BLUE_HOVER = "#60a5fa"
-GRAY_BTN = "#2a2a2a"
-GRAY_HOVER = "#3a3a3a"
-RED = "#ef4444"
-GREEN = "#22c55e"
-DIM = "#666666"
-
-# ── Translations ──
 LANG = {
     'en': {
-        'mods': 'MODS',
+        'mods': 'Mods',
         'blood': 'Enable Blood & Corpse',
         'vng': 'Remove VNG Logo',
-        'launch': 'LAUNCH',
+        'launch': 'Launch',
         'play': 'PLAY VALORANT',
         'launching': 'LAUNCHING...',
         'riot_found': 'Riot Client found',
-        'riot_not_found': 'Riot Client not found — click Browse to locate',
+        'riot_not_found': 'Riot Client not found — Browse to locate',
         'riot_browse': 'Browse',
-        'log': 'LOG',
-        'optimization': 'OPTIMIZATION',
+        'log': 'Log',
+        'optimization': 'Optimization',
         'fps': 'FPS Boost',
         'optimize': 'Optimize',
         'gfx': 'Graphics Quality',
         'apply_low': 'Apply Low',
         'restore': 'Restore',
-        'game_folder': 'GAME FOLDER',
+        'game_folder': 'Game Folder',
         'browse': 'Browse',
         'auto_detected': 'Auto-detected',
         'custom_path': 'Custom path set',
@@ -83,31 +70,30 @@ LANG = {
         'start_seq': 'Starting launch sequence...',
         'done': 'Done.',
         'developed_by': 'Developed by Chemg0d',
-        'minimized': 'Minimized to tray.',
-        'stretch': 'TRUE STRETCH',
+        'stretch': 'True Stretch',
         'resolution': 'Resolution',
         'apply_stretch': 'Apply Stretch',
         'revert_stretch': 'Revert',
         'stretch_hint': 'Modifies game config + sets read-only. Revert to undo.',
     },
     'vi': {
-        'mods': 'TINH CHỈNH',
+        'mods': 'Tinh chỉnh',
         'blood': 'Hiển thị Máu & Xác',
         'vng': 'Xóa Logo VNG',
-        'launch': 'KHỞI ĐỘNG',
+        'launch': 'Khởi động',
         'play': 'CHƠI VALORANT',
         'launching': 'ĐANG KHỞI ĐỘNG...',
         'riot_found': 'Đã tìm thấy Riot Client',
-        'riot_not_found': 'Không tìm thấy Riot Client — nhấn Chọn để tìm',
+        'riot_not_found': 'Không tìm thấy Riot Client — Nhấn Chọn',
         'riot_browse': 'Chọn',
-        'log': 'NHẬT KÝ',
-        'optimization': 'TỐI ƯU',
+        'log': 'Nhật ký',
+        'optimization': 'Tối ưu',
         'fps': 'Tăng FPS',
         'optimize': 'Tối ưu',
         'gfx': 'Chất lượng đồ họa',
         'apply_low': 'Hạ thấp',
         'restore': 'Khôi phục',
-        'game_folder': 'THƯ MỤC GAME',
+        'game_folder': 'Thư mục game',
         'browse': 'Chọn',
         'auto_detected': 'Tự động phát hiện',
         'custom_path': 'Đã đặt đường dẫn',
@@ -126,8 +112,7 @@ LANG = {
         'start_seq': 'Bắt đầu trình khởi động...',
         'done': 'Xong.',
         'developed_by': 'Phát triển bởi Chemg0d',
-        'minimized': 'Thu nhỏ xuống khay.',
-        'stretch': 'TRUE STRETCH',
+        'stretch': 'True Stretch',
         'resolution': 'Độ phân giải',
         'apply_stretch': 'Áp dụng Stretch',
         'revert_stretch': 'Hoàn tác',
@@ -136,80 +121,419 @@ LANG = {
 }
 
 
-class MainWindow(ctk.CTk):
+def _get_base_dir():
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+BASE_DIR = _get_base_dir()
+BLOOD_DIR = os.path.join(BASE_DIR, 'blood')
+DEFAULT_PAKS_DIR = r'C:\Riot Games\VALORANT\live\ShooterGame\Content\Paks'
+
+
+# ═══════════════════════════════════════
+#  QThread workers
+# ═══════════════════════════════════════
+class LaunchThread(QThread):
+    log_signal = pyqtSignal(str)
+    finished_ok = pyqtSignal()
+    finished_err = pyqtSignal(str)
+
+    def __init__(self, blood_dir, paks_dir, enable_blood, enable_vng,
+                 custom_riot_path, parent=None):
+        super().__init__(parent)
+        self.blood_dir = blood_dir
+        self.paks_dir = paks_dir
+        self.enable_blood = enable_blood
+        self.enable_vng = enable_vng
+        self.custom_riot_path = custom_riot_path
+
+    def run(self):
+        worker = GameLaunchWorker(
+            blood_dir=self.blood_dir, paks_dir=self.paks_dir,
+            enable_blood=self.enable_blood,
+            enable_vng_remove=self.enable_vng,
+            custom_riot_path=self.custom_riot_path,
+            on_log=lambda msg: self.log_signal.emit(msg),
+            on_ok=lambda: self.finished_ok.emit(),
+            on_err=lambda err: self.finished_err.emit(err),
+        )
+        worker._run()
+
+
+class StretchRevertThread(QThread):
+    revert_signal = pyqtSignal()
+
+    def run(self):
+        for _ in range(150):
+            if is_game_running():
+                break
+            time.sleep(2)
+        else:
+            return
+        while is_game_running():
+            time.sleep(2)
+        self.revert_signal.emit()
+
+
+# ═══════════════════════════════════════
+#  Main Window — Horizontal layout
+# ═══════════════════════════════════════
+class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.config = load_config()
         self.lang = self.config.get('language', 'en')
-        self.launch_worker = None
+        self.launch_thread = None
         self.stretch_active = False
         self.stretch_linked = False
         self.native_w, self.native_h = 0, 0
         self.tray_icon = None
+
+        setTheme(Theme.DARK)
         self._build_ui()
-        # X button → hide to tray instead of closing
-        self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
-        # Setup tray icon in background thread
-        if TRAY_AVAILABLE:
-            threading.Thread(target=self._setup_tray, daemon=True).start()
-
-    def _setup_tray(self):
-        """Create system tray icon with Show/Quit menu."""
-        try:
-            icon_path = os.path.join(BIN_DIR, 'icon.ico')
-            if os.path.exists(icon_path):
-                image = Image.open(icon_path)
-            else:
-                # Fallback: small blue square
-                image = Image.new('RGB', (64, 64), color='#3b82f6')
-
-            menu = pystray.Menu(
-                pystray.MenuItem("Show HiddenDisplay", self._show_from_tray, default=True),
-                pystray.MenuItem("Quit", self._quit_from_tray),
-            )
-            self.tray_icon = pystray.Icon("HiddenDisplay", image, "HiddenDisplay", menu)
-            self.tray_icon.run()
-        except Exception:
-            pass
-
-    def _hide_to_tray(self):
-        """Hide window to system tray instead of closing."""
-        if TRAY_AVAILABLE and self.tray_icon:
-            self.withdraw()
-        else:
-            # No tray available — just minimize
-            self.iconify()
-
-    def _show_from_tray(self, icon=None, item=None):
-        """Restore window from tray."""
-        self.after(0, self._do_show)
-
-    def _do_show(self):
-        self.deiconify()
-        self.lift()
-        self.focus_force()
-
-    def _quit_from_tray(self, icon=None, item=None):
-        """Quit properly from tray menu — runs full cleanup."""
-        self.after(0, self._real_quit)
-
-    def _real_quit(self):
-        """Actual quit — runs emergency cleanup + destroys window."""
-        try:
-            paks_dir = self._get_paks_dir()
-            emergency_cleanup(paks_dir)
-        except Exception:
-            pass
-        if self.tray_icon:
-            try:
-                self.tray_icon.stop()
-            except Exception:
-                pass
-        self.destroy()
+        self._setup_tray()
 
     def t(self, key):
         return LANG.get(self.lang, LANG['en']).get(key, key)
 
+    # ─────────────────────────────────────
+    #  UI
+    # ─────────────────────────────────────
+    def _build_ui(self):
+        self.setWindowTitle(APP_NAME)
+        self.resize(960, 560)
+        self.setMinimumSize(860, 480)
+
+        icon_path = os.path.join(BIN_DIR, 'icon.ico')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 16)
+        root.setSpacing(12)
+
+        # ── Header row ──
+        header = QHBoxLayout()
+        title = TitleLabel(APP_NAME)
+        header.addWidget(title)
+        self.dev_label = CaptionLabel(f"v{APP_VERSION}  ·  {self.t('developed_by')}")
+        header.addWidget(self.dev_label)
+        header.addStretch()
+
+        self.lang_combo = ComboBox()
+        self.lang_combo.addItems(["EN", "VI"])
+        self.lang_combo.setCurrentText("VI" if self.lang == 'vi' else "EN")
+        self.lang_combo.setFixedWidth(70)
+        self.lang_combo.currentTextChanged.connect(self._change_language)
+        header.addWidget(self.lang_combo)
+        root.addLayout(header)
+
+        # ── Two columns ──
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+
+        # ═══ LEFT COLUMN ═══
+        left = QVBoxLayout()
+        left.setSpacing(12)
+
+        # Game Folder
+        folder_card = CardWidget()
+        fc = QVBoxLayout(folder_card)
+        fc.setContentsMargins(16, 12, 16, 12)
+        fc.setSpacing(8)
+        self.folder_title = StrongBodyLabel(self.t('game_folder'))
+        fc.addWidget(self.folder_title)
+
+        fr = QHBoxLayout()
+        self.path_entry = LineEdit()
+        self.path_entry.setPlaceholderText(r"C:\Riot Games\VALORANT")
+        saved = self.config.get('game_path', '')
+        if saved:
+            self.path_entry.setText(saved)
+        fr.addWidget(self.path_entry)
+        self.browse_btn = PushButton(self.t('browse'))
+        self.browse_btn.setFixedWidth(72)
+        self.browse_btn.clicked.connect(self._browse_folder)
+        fr.addWidget(self.browse_btn)
+        fc.addLayout(fr)
+        self.path_status = CaptionLabel("")
+        fc.addWidget(self.path_status)
+        self._update_path_status()
+        left.addWidget(folder_card)
+
+        # Mods
+        mods_card = CardWidget()
+        mc = QVBoxLayout(mods_card)
+        mc.setContentsMargins(16, 12, 16, 12)
+        mc.setSpacing(6)
+        self.mods_title = StrongBodyLabel(self.t('mods'))
+        mc.addWidget(self.mods_title)
+        self.chk_blood = CheckBox(self.t('blood'))
+        if self.config.get('enable_blood', True):
+            self.chk_blood.setChecked(True)
+        mc.addWidget(self.chk_blood)
+        self.chk_vng = CheckBox(self.t('vng'))
+        if self.config.get('enable_vng_remove', True):
+            self.chk_vng.setChecked(True)
+        mc.addWidget(self.chk_vng)
+        left.addWidget(mods_card)
+
+        # Launch
+        launch_card = CardWidget()
+        lc = QVBoxLayout(launch_card)
+        lc.setContentsMargins(16, 12, 16, 12)
+        lc.setSpacing(8)
+        self.launch_title = StrongBodyLabel(self.t('launch'))
+        lc.addWidget(self.launch_title)
+
+        self.launch_btn = PrimaryPushButton(self.t('play'))
+        self.launch_btn.setFixedHeight(44)
+        f = self.launch_btn.font()
+        f.setPointSize(13)
+        f.setBold(True)
+        self.launch_btn.setFont(f)
+        self.launch_btn.clicked.connect(self._launch_game)
+        lc.addWidget(self.launch_btn)
+
+        rr = QHBoxLayout()
+        custom_riot = self.config.get('riot_client_path', '')
+        riot = find_riot_client(custom_riot)
+        self.riot_label = CaptionLabel(
+            self.t('riot_found') if riot else self.t('riot_not_found'))
+        self.riot_label.setStyleSheet(
+            f"color: {'#22c55e' if riot else '#ef4444'};")
+        rr.addWidget(self.riot_label)
+        rr.addStretch()
+        self.riot_browse_btn = PushButton(self.t('riot_browse'))
+        self.riot_browse_btn.setFixedWidth(64)
+        self.riot_browse_btn.clicked.connect(self._browse_riot_client)
+        rr.addWidget(self.riot_browse_btn)
+        lc.addLayout(rr)
+        left.addWidget(launch_card)
+
+        left.addStretch()
+        columns.addLayout(left, 1)
+
+        # ═══ RIGHT COLUMN ═══
+        right = QVBoxLayout()
+        right.setSpacing(12)
+
+        # Optimization
+        opt_card = CardWidget()
+        oc = QVBoxLayout(opt_card)
+        oc.setContentsMargins(16, 12, 16, 12)
+        oc.setSpacing(8)
+        self.opt_title = StrongBodyLabel(self.t('optimization'))
+        oc.addWidget(self.opt_title)
+
+        frow = QHBoxLayout()
+        self.fps_label = BodyLabel(self.t('fps'))
+        frow.addWidget(self.fps_label)
+        frow.addStretch()
+        self.opt_btn = PushButton(self.t('optimize'))
+        self.opt_btn.setFixedWidth(90)
+        self.opt_btn.clicked.connect(self._optimize_fps)
+        frow.addWidget(self.opt_btn)
+        oc.addLayout(frow)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFixedHeight(1)
+        oc.addWidget(sep)
+
+        grow = QHBoxLayout()
+        self.gfx_label = BodyLabel(self.t('gfx'))
+        grow.addWidget(self.gfx_label)
+        grow.addStretch()
+        self.apply_gfx_btn = PushButton(self.t('apply_low'))
+        self.apply_gfx_btn.setFixedWidth(90)
+        self.apply_gfx_btn.clicked.connect(self._apply_graphics)
+        grow.addWidget(self.apply_gfx_btn)
+        self.restore_gfx_btn = PushButton(self.t('restore'))
+        self.restore_gfx_btn.setFixedWidth(90)
+        self.restore_gfx_btn.clicked.connect(self._restore_graphics)
+        grow.addWidget(self.restore_gfx_btn)
+        oc.addLayout(grow)
+        right.addWidget(opt_card)
+
+        # Stretch
+        stretch_card = CardWidget()
+        sc = QVBoxLayout(stretch_card)
+        sc.setContentsMargins(16, 12, 16, 12)
+        sc.setSpacing(8)
+        self.stretch_title = StrongBodyLabel(self.t('stretch'))
+        sc.addWidget(self.stretch_title)
+
+        resrow = QHBoxLayout()
+        self.res_label = BodyLabel(self.t('resolution'))
+        resrow.addWidget(self.res_label)
+        resrow.addStretch()
+        self.link_btn = PushButton("🔗")
+        self.link_btn.setFixedSize(30, 30)
+        self.link_btn.setToolTip("Link stretch to Play")
+        self.link_btn.clicked.connect(self._toggle_stretch_link)
+        resrow.addWidget(self.link_btn)
+        self._res_options = self._build_res_options()
+        self.res_combo = ComboBox()
+        self.res_combo.addItems(self._res_options)
+        self.res_combo.setFixedWidth(200)
+        self.res_combo.currentTextChanged.connect(self._on_res_change)
+        resrow.addWidget(self.res_combo)
+        sc.addLayout(resrow)
+
+        # Restore last res
+        last_res = self.config.get('last_resolution', '')
+        init_opt = self._res_options[0] if self._res_options else ""
+        if last_res == 'custom':
+            init_opt = "Custom"
+        elif last_res:
+            for o in self._res_options:
+                if last_res in o:
+                    init_opt = o
+                    break
+        self.res_combo.setCurrentText(init_opt)
+
+        # Custom resolution
+        self.custom_res_widget = QWidget()
+        cr = QHBoxLayout(self.custom_res_widget)
+        cr.setContentsMargins(0, 0, 0, 0)
+        cr.addWidget(BodyLabel("W × H:"))
+        self.custom_w_entry = LineEdit()
+        self.custom_w_entry.setPlaceholderText("1440")
+        self.custom_w_entry.setFixedWidth(70)
+        cw = self.config.get('custom_width', '')
+        if cw:
+            self.custom_w_entry.setText(str(cw))
+        cr.addWidget(self.custom_w_entry)
+        cr.addWidget(BodyLabel("×"))
+        self.custom_h_entry = LineEdit()
+        self.custom_h_entry.setPlaceholderText("1080")
+        self.custom_h_entry.setFixedWidth(70)
+        ch = self.config.get('custom_height', '')
+        if ch:
+            self.custom_h_entry.setText(str(ch))
+        cr.addWidget(self.custom_h_entry)
+        self.save_custom_btn = PushButton("Save")
+        self.save_custom_btn.setFixedWidth(56)
+        self.save_custom_btn.clicked.connect(self._save_custom_resolution)
+        cr.addWidget(self.save_custom_btn)
+        cr.addStretch()
+        self.custom_res_widget.setVisible(last_res == 'custom')
+        sc.addWidget(self.custom_res_widget)
+
+        srow = QHBoxLayout()
+        self.stretch_btn = PushButton(self.t('apply_stretch'))
+        self.stretch_btn.clicked.connect(self._apply_stretch)
+        srow.addWidget(self.stretch_btn)
+        self.revert_btn = PushButton(self.t('revert_stretch'))
+        self.revert_btn.setFixedWidth(90)
+        self.revert_btn.clicked.connect(self._revert_stretch)
+        srow.addWidget(self.revert_btn)
+        sc.addLayout(srow)
+        self.stretch_hint_label = CaptionLabel(self.t('stretch_hint'))
+        sc.addWidget(self.stretch_hint_label)
+        right.addWidget(stretch_card)
+
+        # Log
+        log_card = CardWidget()
+        lgc = QVBoxLayout(log_card)
+        lgc.setContentsMargins(16, 12, 16, 12)
+        lgc.setSpacing(6)
+        self.log_title = StrongBodyLabel(self.t('log'))
+        lgc.addWidget(self.log_title)
+        self.log_box = TextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMinimumHeight(80)
+        lgc.addWidget(self.log_box)
+        right.addWidget(log_card, 1)  # stretches to fill
+
+        columns.addLayout(right, 1)
+        root.addLayout(columns, 1)
+
+    # ─────────────────────────────────────
+    #  Tray
+    # ─────────────────────────────────────
+    def _setup_tray(self):
+        icon_path = os.path.join(BIN_DIR, 'icon.ico')
+        icon = QIcon(icon_path) if os.path.exists(icon_path) else \
+            self.style().standardIcon(self.style().StandardPixmap.SP_ComputerIcon)
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        menu = QMenu()
+        menu.addAction("Show HiddenDisplay").triggered.connect(self._show_from_tray)
+        menu.addAction("Quit").triggered.connect(self._quit_from_tray)
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.show()
+
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_from_tray()
+
+    def _show_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _quit_from_tray(self):
+        try:
+            emergency_cleanup(self._get_paks_dir())
+        except Exception:
+            pass
+        if self.tray_icon:
+            self.tray_icon.hide()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        if self.tray_icon and self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            event.accept()
+
+    # ─────────────────────────────────────
+    #  Language
+    # ─────────────────────────────────────
+    def _change_language(self, choice):
+        self.lang = 'vi' if choice == 'VI' else 'en'
+        self.config['language'] = self.lang
+        save_config(self.config)
+        self._refresh_texts()
+
+    def _refresh_texts(self):
+        self.dev_label.setText(f"v{APP_VERSION}  ·  {self.t('developed_by')}")
+        self.folder_title.setText(self.t('game_folder'))
+        self.browse_btn.setText(self.t('browse'))
+        self.mods_title.setText(self.t('mods'))
+        self.chk_blood.setText(self.t('blood'))
+        self.chk_vng.setText(self.t('vng'))
+        self.launch_title.setText(self.t('launch'))
+        self.launch_btn.setText(self.t('play'))
+        self.riot_browse_btn.setText(self.t('riot_browse'))
+        self.log_title.setText(self.t('log'))
+        self.opt_title.setText(self.t('optimization'))
+        self.fps_label.setText(self.t('fps'))
+        self.opt_btn.setText(self.t('optimize'))
+        self.gfx_label.setText(self.t('gfx'))
+        self.apply_gfx_btn.setText(self.t('apply_low'))
+        self.restore_gfx_btn.setText(self.t('restore'))
+        self.stretch_title.setText(self.t('stretch'))
+        self.res_label.setText(self.t('resolution'))
+        self.stretch_btn.setText(self.t('apply_stretch'))
+        self.revert_btn.setText(self.t('revert_stretch'))
+        self.stretch_hint_label.setText(self.t('stretch_hint'))
+        custom_riot = self.config.get('riot_client_path', '')
+        riot = find_riot_client(custom_riot)
+        self.riot_label.setText(
+            self.t('riot_found') if riot else self.t('riot_not_found'))
+        self.riot_label.setStyleSheet(
+            f"color: {'#22c55e' if riot else '#ef4444'};")
+        self._update_path_status()
+
+    # ─────────────────────────────────────
+    #  Game Folder
+    # ─────────────────────────────────────
     def _resolve_paks_dir(self, base_path):
         for sub in ('live/ShooterGame/Content/Paks', 'ShooterGame/Content/Paks'):
             p = os.path.join(base_path, sub)
@@ -227,417 +551,74 @@ class MainWindow(ctk.CTk):
             return DEFAULT_PAKS_DIR
         return None
 
-    def _build_ui(self):
-        # Window config
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
-        self.title(APP_NAME)
-        self.geometry("520x820")
-        self.minsize(480, 700)
-        self.configure(fg_color="#0d0d0d")
-
-        icon_path = os.path.join(BIN_DIR, 'icon.ico')
-        if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
-
-        # Scrollable frame for content
-        self.scroll = ctk.CTkScrollableFrame(self, fg_color="#0d0d0d", scrollbar_button_color="#2a2a2a")
-        self.scroll.pack(fill="both", expand=True, padx=0, pady=0)
-        container = self.scroll
-
-        # ── Header ──
-        header_frame = ctk.CTkFrame(container, fg_color="transparent")
-        header_frame.pack(fill="x", padx=20, pady=(16, 0))
-
-        # Spacer left
-        header_frame.grid_columnconfigure(0, weight=1)
-        header_frame.grid_columnconfigure(1, weight=0)
-        header_frame.grid_columnconfigure(2, weight=0)
-
-        title = ctk.CTkLabel(header_frame, text=APP_NAME,
-                              font=ctk.CTkFont(family="Segoe UI Semibold", size=24, weight="bold"))
-        title.grid(row=0, column=0, sticky="w")
-
-        self.lang_menu = ctk.CTkOptionMenu(
-            header_frame, values=["EN", "VI"],
-            width=60, height=28,
-            fg_color=GRAY_BTN, button_color=GRAY_BTN,
-            button_hover_color=GRAY_HOVER,
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            command=self._change_language
-        )
-        self.lang_menu.set("VI" if self.lang == 'vi' else "EN")
-        self.lang_menu.grid(row=0, column=2, sticky="e")
-
-        self.dev_label = ctk.CTkLabel(container, text=self.t('developed_by'),
-                                       text_color=DIM, font=ctk.CTkFont(family="Segoe UI", size=11))
-        self.dev_label.pack(padx=20, anchor="w", pady=(0, 8))
-
-        # ── Game Folder ──
-        self.folder_label = ctk.CTkLabel(container, text=self.t('game_folder'),
-                                          font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.folder_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        folder_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        folder_frame.pack(fill="x", padx=20, pady=(0, 2))
-
-        self.path_entry = ctk.CTkEntry(folder_frame, placeholder_text=r"C:\Riot Games\VALORANT",
-                                        border_width=0, fg_color="#111111", height=36)
-        saved_path = self.config.get('game_path', '')
-        if saved_path:
-            self.path_entry.insert(0, saved_path)
-        self.path_entry.pack(side="left", fill="x", expand=True, padx=(8, 4), pady=8)
-
-        self.browse_btn = ctk.CTkButton(folder_frame, text=self.t('browse'), width=70, height=32,
-                                         fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                         font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                         command=self._browse_folder)
-        self.browse_btn.pack(side="right", padx=(0, 8), pady=8)
-
-        self.path_status = ctk.CTkLabel(container, text="", font=ctk.CTkFont(family="Segoe UI", size=10))
-        self.path_status.pack(padx=24, anchor="w", pady=(0, 6))
-        self._update_path_status()
-
-        # ── Mods ──
-        self.mods_label = ctk.CTkLabel(container, text=self.t('mods'),
-                                        font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.mods_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        mods_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        mods_frame.pack(fill="x", padx=20, pady=(0, 6))
-
-        self.chk_blood = ctk.CTkCheckBox(mods_frame, text=self.t('blood'),
-                                          font=ctk.CTkFont(family="Segoe UI", size=13),
-                                          checkbox_width=22, checkbox_height=22, corner_radius=4,
-                                          fg_color=BLUE, hover_color=BLUE_HOVER)
-        if self.config.get('enable_blood', True):
-            self.chk_blood.select()
-        self.chk_blood.pack(padx=16, pady=(12, 4), anchor="w")
-
-        self.chk_vng = ctk.CTkCheckBox(mods_frame, text=self.t('vng'),
-                                        font=ctk.CTkFont(family="Segoe UI", size=13),
-                                        checkbox_width=22, checkbox_height=22, corner_radius=4,
-                                        fg_color=BLUE, hover_color=BLUE_HOVER)
-        if self.config.get('enable_vng_remove', True):
-            self.chk_vng.select()
-        self.chk_vng.pack(padx=16, pady=(4, 12), anchor="w")
-
-        # ── Launch ──
-        self.launch_label = ctk.CTkLabel(container, text=self.t('launch'),
-                                          font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.launch_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        launch_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        launch_frame.pack(fill="x", padx=20, pady=(0, 2))
-
-        self.launch_btn = ctk.CTkButton(launch_frame, text=self.t('play'), height=48,
-                                         font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
-                                         fg_color=BLUE, hover_color=BLUE_HOVER,
-                                         corner_radius=8,
-                                         command=self._launch_game)
-        self.launch_btn.pack(fill="x", padx=12, pady=(12, 6))
-
-        riot_row = ctk.CTkFrame(launch_frame, fg_color="transparent")
-        riot_row.pack(fill="x", padx=12, pady=(0, 10))
-
-        custom_riot = self.config.get('riot_client_path', '')
-        riot = find_riot_client(custom_riot)
-        self.riot_label = ctk.CTkLabel(riot_row,
-                                        text=self.t('riot_found') if riot else self.t('riot_not_found'),
-                                        text_color=GREEN if riot else RED,
-                                        font=ctk.CTkFont(family="Segoe UI", size=10))
-        self.riot_label.pack(side="left")
-
-        self.riot_browse_btn = ctk.CTkButton(riot_row, text=self.t('riot_browse'),
-                                              width=60, height=26,
-                                              fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                              font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                                              command=self._browse_riot_client)
-        self.riot_browse_btn.pack(side="right")
-
-        # ── Log ──
-        self.log_label = ctk.CTkLabel(container, text=self.t('log'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.log_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        self.log_box = ctk.CTkTextbox(container, height=100, fg_color="#0a0a0a",
-                                       border_width=1, border_color="#2a2a2a",
-                                       corner_radius=8,
-                                       font=ctk.CTkFont(family="Consolas", size=11),
-                                       text_color="#888888", state="disabled")
-        self.log_box.pack(fill="x", padx=20, pady=(0, 6))
-
-        # ── Optimization ──
-        self.opt_label = ctk.CTkLabel(container, text=self.t('optimization'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.opt_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        opt_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        opt_frame.pack(fill="x", padx=20, pady=(0, 6))
-
-        # FPS row
-        fps_row = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        fps_row.pack(fill="x", padx=12, pady=(12, 6))
-
-        self.fps_label = ctk.CTkLabel(fps_row, text=self.t('fps'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12))
-        self.fps_label.pack(side="left")
-
-        self.opt_btn = ctk.CTkButton(fps_row, text=self.t('optimize'), width=90, height=32,
-                                      fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                      font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                      command=self._optimize_fps,
-                                      state="disabled")
-        self.opt_btn.pack(side="right")
-
-        # Separator
-        sep1 = ctk.CTkFrame(opt_frame, fg_color="#2a2a2a", height=1)
-        sep1.pack(fill="x", padx=12, pady=4)
-
-        # Graphics row
-        gfx_row = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        gfx_row.pack(fill="x", padx=12, pady=(6, 12))
-
-        self.gfx_label = ctk.CTkLabel(gfx_row, text=self.t('gfx'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12))
-        self.gfx_label.pack(side="left")
-
-        self.restore_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('restore'), width=90, height=32,
-                                              fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                              font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                              command=self._restore_graphics,
-                                              state="disabled")
-        self.restore_gfx_btn.pack(side="right", padx=(6, 0))
-
-        self.apply_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('apply_low'), width=90, height=32,
-                                            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                            command=self._apply_graphics,
-                                            state="disabled")
-        self.apply_gfx_btn.pack(side="right")
-
-        # ── True Stretch ──
-        self.stretch_label = ctk.CTkLabel(container, text=self.t('stretch'),
-                                           font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.stretch_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        stretch_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        stretch_frame.pack(fill="x", padx=20, pady=(0, 6))
-
-        # Resolution selector
-        res_row = ctk.CTkFrame(stretch_frame, fg_color="transparent")
-        res_row.pack(fill="x", padx=12, pady=(12, 6))
-
-        self.res_label = ctk.CTkLabel(res_row, text=self.t('resolution'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12))
-        self.res_label.pack(side="left")
-
-        self._res_options = self._build_res_options()
-
-        self.res_menu = ctk.CTkOptionMenu(
-            res_row, values=self._res_options, width=240, height=30,
-            fg_color=GRAY_BTN, button_color=GRAY_BTN, button_hover_color=GRAY_HOVER,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            command=self._on_res_change)
-        self.res_menu.pack(side="right")
-
-        # Link icon — toggles whether stretch is applied when pressing Play
-        link_icon_path = os.path.join(BIN_DIR, 'link.png')
-        self._link_img = ctk.CTkImage(
-            light_image=Image.open(link_icon_path),
-            dark_image=Image.open(link_icon_path),
-            size=(16, 16))
-        self.link_btn = ctk.CTkButton(
-            res_row, image=self._link_img, text="",
-            width=30, height=30,
-            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-            corner_radius=6,
-            command=self._toggle_stretch_link)
-        self.link_btn.pack(side="right", padx=(0, 6))
-        # Restore last used resolution
-        last_res = self.config.get('last_resolution', '')
-        initial_option = self._res_options[0]
-        if last_res == 'custom':
-            initial_option = "Custom"
-        elif last_res:
-            for opt in self._res_options:
-                if last_res in opt:
-                    initial_option = opt
-                    break
-        self.res_menu.set(initial_option)
-
-        # Custom resolution input (hidden by default)
-        self.custom_res_frame = ctk.CTkFrame(stretch_frame, fg_color="transparent")
-
-        custom_label = ctk.CTkLabel(self.custom_res_frame, text="W x H:",
-                                     font=ctk.CTkFont(family="Segoe UI", size=11))
-        custom_label.pack(side="left", padx=(0, 6))
-
-        self.custom_w_entry = ctk.CTkEntry(self.custom_res_frame, width=70, height=28,
-                                            placeholder_text="1440", border_width=0,
-                                            fg_color="#111111",
-                                            font=ctk.CTkFont(family="Segoe UI", size=11))
-        saved_w = self.config.get('custom_width', '')
-        if saved_w:
-            self.custom_w_entry.insert(0, str(saved_w))
-        self.custom_w_entry.pack(side="left", padx=(0, 4))
-
-        ctk.CTkLabel(self.custom_res_frame, text="x",
-                      font=ctk.CTkFont(family="Segoe UI", size=11)).pack(side="left", padx=2)
-
-        self.custom_h_entry = ctk.CTkEntry(self.custom_res_frame, width=70, height=28,
-                                            placeholder_text="1080", border_width=0,
-                                            fg_color="#111111",
-                                            font=ctk.CTkFont(family="Segoe UI", size=11))
-        saved_h = self.config.get('custom_height', '')
-        if saved_h:
-            self.custom_h_entry.insert(0, str(saved_h))
-        self.custom_h_entry.pack(side="left", padx=(4, 0))
-
-        # Save custom resolution button
-        self.save_custom_btn = ctk.CTkButton(self.custom_res_frame, text="Save",
-                                              width=50, height=28,
-                                              fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                              font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-                                              command=self._save_custom_resolution)
-        self.save_custom_btn.pack(side="left", padx=(6, 0))
-
-        # Show custom frame if last resolution was custom
-        if last_res == 'custom':
-            self.custom_res_frame.pack(fill="x", padx=12, pady=(0, 4))
-
-        # Buttons row
-        btn_row = ctk.CTkFrame(stretch_frame, fg_color="transparent")
-        btn_row.pack(fill="x", padx=12, pady=(4, 6))
-
-        self.stretch_btn = ctk.CTkButton(btn_row, text=self.t('apply_stretch'), height=34,
-                                          fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                          font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                                          command=self._apply_stretch)
-        self.stretch_btn.pack(side="left", expand=True, fill="x", padx=(0, 4))
-
-        self.revert_btn = ctk.CTkButton(btn_row, text=self.t('revert_stretch'), height=34,
-                                         fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                         font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                         command=self._revert_stretch, width=90)
-        self.revert_btn.pack(side="right")
-
-        stretch_hint = ctk.CTkLabel(stretch_frame,
-                                     text=self.t('stretch_hint'),
-                                     font=ctk.CTkFont(family="Segoe UI", size=9),
-                                     text_color=DIM)
-        stretch_hint.pack(padx=12, anchor="w", pady=(0, 8))
-
-        # Bottom padding
-        ctk.CTkLabel(container, text="", height=10).pack()
-
-    # ── Language ──
-    def _change_language(self, choice):
-        self.lang = 'vi' if choice == 'VI' else 'en'
-        self.config['language'] = self.lang
-        save_config(self.config)
-        self._refresh_texts()
-
-    def _refresh_texts(self):
-        self.dev_label.configure(text=self.t('developed_by'))
-        self.folder_label.configure(text=self.t('game_folder'))
-        self.browse_btn.configure(text=self.t('browse'))
-        self.mods_label.configure(text=self.t('mods'))
-        self.chk_blood.configure(text=self.t('blood'))
-        self.chk_vng.configure(text=self.t('vng'))
-        self.launch_label.configure(text=self.t('launch'))
-        self.launch_btn.configure(text=self.t('play'))
-        self.riot_browse_btn.configure(text=self.t('riot_browse'))
-        self.log_label.configure(text=self.t('log'))
-        self.opt_label.configure(text=self.t('optimization'))
-        self.fps_label.configure(text=self.t('fps'))
-        self.opt_btn.configure(text=self.t('optimize'))
-        self.gfx_label.configure(text=self.t('gfx'))
-        self.apply_gfx_btn.configure(text=self.t('apply_low'))
-        self.restore_gfx_btn.configure(text=self.t('restore'))
-        custom_riot = self.config.get('riot_client_path', '')
-        riot = find_riot_client(custom_riot)
-        self.riot_label.configure(
-            text=self.t('riot_found') if riot else self.t('riot_not_found'),
-            text_color=GREEN if riot else RED)
-        self._update_path_status()
-        # Stretch
-        self.stretch_label.configure(text=self.t('stretch'))
-        self.res_label.configure(text=self.t('resolution'))
-        self.stretch_btn.configure(text=self.t('apply_stretch'))
-        self.revert_btn.configure(text=self.t('revert_stretch'))
-        self._res_options = self._build_res_options()
-        self.res_menu.configure(values=self._res_options)
-        self.res_menu.set(self._res_options[0])
-
-    # ── Game Folder ──
     def _browse_folder(self):
-        path = ctk.filedialog.askdirectory(title="Select VALORANT Folder",
-                                            initialdir=r"C:\Riot Games")
+        path = QFileDialog.getExistingDirectory(
+            self, "Select VALORANT Folder", r"C:\Riot Games")
         if path:
-            self.path_entry.delete(0, "end")
-            self.path_entry.insert(0, path)
+            self.path_entry.setText(path)
             self.config['game_path'] = path
             save_config(self.config)
             self._update_path_status()
 
     def _browse_riot_client(self):
-        path = ctk.filedialog.askopenfilename(
-            title="Select RiotClientServices.exe",
-            initialdir=r"C:\Riot Games\Riot Client",
-            filetypes=[("Executable", "RiotClientServices.exe"), ("All Files", "*.*")])
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select RiotClientServices.exe",
+            r"C:\Riot Games\Riot Client",
+            "Executable (RiotClientServices.exe);;All Files (*.*)")
         if path and os.path.exists(path):
             self.config['riot_client_path'] = path
             save_config(self.config)
-            self.riot_label.configure(text=self.t('riot_found'), text_color=GREEN)
+            self.riot_label.setText(self.t('riot_found'))
+            self.riot_label.setStyleSheet("color: #22c55e;")
 
     def _update_path_status(self):
-        custom = self.path_entry.get().strip()
+        custom = self.path_entry.text().strip()
         if custom:
             paks = self._resolve_paks_dir(custom)
             if paks:
-                self.path_status.configure(
-                    text=f"{self.t('custom_path')}: {custom}", text_color=GREEN)
+                self.path_status.setText(f"{self.t('custom_path')}: {custom}")
+                self.path_status.setStyleSheet("color: #22c55e;")
                 self.config['game_path'] = custom
                 save_config(self.config)
                 return
-            else:
-                self.path_status.configure(
-                    text=f"{self.t('path_not_found')}: {custom}", text_color=RED)
-                return
+            self.path_status.setText(f"{self.t('path_not_found')}: {custom}")
+            self.path_status.setStyleSheet("color: #ef4444;")
+            return
         if os.path.exists(DEFAULT_PAKS_DIR):
-            self.path_status.configure(
-                text=f"{self.t('auto_detected')}: C:\\Riot Games\\VALORANT", text_color=GREEN)
+            self.path_status.setText(
+                f"{self.t('auto_detected')}: C:\\Riot Games\\VALORANT")
+            self.path_status.setStyleSheet("color: #22c55e;")
         else:
-            self.path_status.configure(text=self.t('path_not_found'), text_color=RED)
+            self.path_status.setText(self.t('path_not_found'))
+            self.path_status.setStyleSheet("color: #ef4444;")
 
-    # ── Log ──
+    # ─────────────────────────────────────
+    #  Log
+    # ─────────────────────────────────────
     def _log(self, msg):
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self.log_box.configure(state="normal")
-        self.log_box.insert("end", f"[{ts}] {msg}\n")
-        self.log_box.see("end")
-        self.log_box.configure(state="disabled")
+        self.log_box.append(f"[{ts}] {msg}")
 
-    # ── Launch ──
+    # ─────────────────────────────────────
+    #  Launch
+    # ─────────────────────────────────────
     def _launch_game(self):
-        self.config['enable_blood'] = self.chk_blood.get() == 1
-        self.config['enable_vng_remove'] = self.chk_vng.get() == 1
+        self.config['enable_blood'] = self.chk_blood.isChecked()
+        self.config['enable_vng_remove'] = self.chk_vng.isChecked()
         save_config(self.config)
 
-        # Apply stretch only if user linked stretch to Play
         if self.stretch_linked:
             res_key = self._get_selected_resolution_key()
-            custom_w, custom_h = 0, 0
+            cw, ch = 0, 0
             if res_key == 'custom':
                 try:
-                    custom_w = int(self.config.get('custom_width', '0'))
-                    custom_h = int(self.config.get('custom_height', '0'))
+                    cw = int(self.config.get('custom_width', '0'))
+                    ch = int(self.config.get('custom_height', '0'))
                 except ValueError:
                     pass
             self._log(f"Applying stretch ({res_key})...")
             try:
-                ok, nw, nh = apply_stretch(res_key, self._log, custom_w, custom_h)
+                ok, nw, nh = apply_stretch(res_key, self._log, cw, ch)
                 if ok and ok != "needs_custom_res":
                     self.native_w, self.native_h = nw, nh
                     self.stretch_active = True
@@ -649,177 +630,141 @@ class MainWindow(ctk.CTk):
         paks_dir = self._get_paks_dir()
         custom_riot = self.config.get('riot_client_path', '')
 
-        if not self.chk_blood.get() and not self.chk_vng.get():
+        if not self.chk_blood.isChecked() and not self.chk_vng.isChecked():
             import subprocess
             riot_exe = find_riot_client(custom_riot)
             if riot_exe:
                 subprocess.Popen(
-                    f'cmd /c start "" "{riot_exe}" --launch-product=valorant --launch-patchline=live',
+                    f'cmd /c start "" "{riot_exe}" '
+                    '--launch-product=valorant --launch-patchline=live',
                     shell=True, creationflags=0x08000000)
                 self._log(self.t('no_mods'))
-                # Spawn stretch revert watcher if stretch was linked
                 if self.stretch_linked and self.stretch_active:
-                    revert_thread = threading.Thread(
-                        target=self._stretch_revert_watcher,
-                        daemon=True
-                    )
-                    revert_thread.start()
+                    self._start_stretch_revert_watcher()
             else:
                 self._show_error(self.t('riot_err'))
             return
 
-        if self.chk_blood.get() and not os.path.exists(BLOOD_DIR):
+        if self.chk_blood.isChecked() and not os.path.exists(BLOOD_DIR):
             self._show_error(f"{self.t('blood_err')}:\n{BLOOD_DIR}")
             return
         if not paks_dir:
             self._show_error(self.t('paks_err'))
             return
 
-        self.launch_btn.configure(state="disabled", text=self.t('launching'))
+        self.launch_btn.setEnabled(False)
+        self.launch_btn.setText(self.t('launching'))
         self._log(self.t('start_seq'))
 
-        self.launch_worker = GameLaunchWorker(
+        self.launch_thread = LaunchThread(
             blood_dir=BLOOD_DIR, paks_dir=paks_dir,
-            enable_blood=self.chk_blood.get() == 1,
-            enable_vng_remove=self.chk_vng.get() == 1,
-            custom_riot_path=custom_riot,
-            on_log=lambda msg: self.after(0, self._log, msg),
-            on_ok=lambda: self.after(0, self._on_launch_ok),
-            on_err=lambda err: self.after(0, self._on_launch_err, err))
-        self.launch_worker.start()
+            enable_blood=self.chk_blood.isChecked(),
+            enable_vng=self.chk_vng.isChecked(),
+            custom_riot_path=custom_riot, parent=self)
+        self.launch_thread.log_signal.connect(self._log)
+        self.launch_thread.finished_ok.connect(self._on_launch_ok)
+        self.launch_thread.finished_err.connect(self._on_launch_err)
+        self.launch_thread.start()
 
-        # Spawn stretch revert watcher if stretch was linked and applied
         if self.stretch_linked and self.stretch_active:
-            revert_thread = threading.Thread(
-                target=self._stretch_revert_watcher,
-                daemon=True
-            )
-            revert_thread.start()
+            self._start_stretch_revert_watcher()
 
-    def _stretch_revert_watcher(self):
-        """Wait for game to start then exit, then auto-revert stretch settings."""
-        # Wait for game to actually start (up to 5 min)
-        for _ in range(150):
-            if is_game_running():
-                break
-            time.sleep(2)
-        else:
-            return  # game never started, abort watcher
-
-        # Wait for game to exit
-        while is_game_running():
-            time.sleep(2)
-
-        # Game closed — revert stretch
-        self.after(0, self._auto_revert_stretch)
+    def _start_stretch_revert_watcher(self):
+        self._revert_thread = StretchRevertThread(self)
+        self._revert_thread.revert_signal.connect(self._auto_revert_stretch)
+        self._revert_thread.start()
 
     def _auto_revert_stretch(self):
-        """Lightweight auto-revert after game exit. Runs on UI thread.
-        Only restores desktop resolution — does NOT touch config files,
-        so any in-game changes (like Show Mature Content) are preserved."""
-        if not self.stretch_active and not self.config.get('last_resolution'):
+        if not self.stretch_active:
             return
         self._log("Game closed — restoring desktop resolution...")
         try:
             auto_revert_on_exit(self.native_w, self.native_h, self._log)
         except Exception as e:
             self._log(f"Revert error: {e}")
-        self._log("Desktop restored. Config preserved so game settings persist.")
+        self._log("Desktop restored.")
 
     def _on_launch_ok(self):
-        self.launch_btn.configure(state="normal", text=self.t('play'))
+        self.launch_btn.setEnabled(True)
+        self.launch_btn.setText(self.t('play'))
         self._log(self.t('done'))
 
     def _on_launch_err(self, err):
-        self.launch_btn.configure(state="normal", text=self.t('play'))
+        self.launch_btn.setEnabled(True)
+        self.launch_btn.setText(self.t('play'))
         self._log(f"ERROR: {err}")
 
     def _show_error(self, msg):
-        from tkinter import messagebox
-        messagebox.showerror(self.t('error'), msg)
+        InfoBar.error(
+            title=self.t('error'), content=msg,
+            orient=Qt.Orientation.Horizontal, isClosable=True,
+            position=InfoBarPosition.TOP, duration=5000, parent=self)
 
     def _show_info(self, title, msg):
-        from tkinter import messagebox
-        messagebox.showinfo(title, msg)
+        InfoBar.success(
+            title=title, content=msg,
+            orient=Qt.Orientation.Horizontal, isClosable=True,
+            position=InfoBarPosition.TOP, duration=5000, parent=self)
 
     def _ask_yes_no(self, title, msg):
-        from tkinter import messagebox
-        return messagebox.askyesno(title, msg)
+        r = QMessageBox.question(
+            self, title, msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        return r == QMessageBox.StandardButton.Yes
 
-    # ── Optimization ──
-    def _set_btn_blue(self, btn):
-        btn.configure(fg_color=BLUE, hover_color=BLUE_HOVER)
-
-    def _set_btn_gray(self, btn):
-        btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
-
+    # ─────────────────────────────────────
+    #  Optimization
+    # ─────────────────────────────────────
     def _optimize_fps(self):
         if not self._ask_yes_no(self.t('fps_title'), self.t('fps_confirm')):
             return
-
         self._log(self.t('creating_rp'))
         create_restore_point()
-
         self._log(self.t('applying_opt'))
         paks_dir = self._get_paks_dir()
         exe_path = None
         if paks_dir:
-            exe = os.path.normpath(os.path.join(paks_dir, '..', '..', 'Binaries', 'Win64',
-                                                 'VALORANT-Win64-Shipping.exe'))
+            exe = os.path.normpath(os.path.join(
+                paks_dir, '..', '..', 'Binaries', 'Win64',
+                'VALORANT-Win64-Shipping.exe'))
             if os.path.exists(exe):
                 exe_path = exe
-
         results = run_all_optimizations(exe_path)
         ok_count = sum(1 for ok, _ in results.values() if ok)
-        details = [f"  [{'OK' if ok else 'FAIL'}] {n}: {m}" for n, (ok, m) in results.items()]
-        if ok_count > 0:
-            self._set_btn_blue(self.opt_btn)
+        details = [f"  [{'OK' if ok else 'FAIL'}] {n}: {m}"
+                   for n, (ok, m) in results.items()]
         self._show_info(self.t('results'),
-            f"{ok_count}/{len(results)} applied:\n\n" + "\n".join(details) + f"\n\n{self.t('restart_pc')}")
+            f"{ok_count}/{len(results)} applied:\n" +
+            "\n".join(details) + f"\n\n{self.t('restart_pc')}")
 
     def _apply_graphics(self):
         ok, msg = apply_low_preset(os.path.join(BIN_DIR, 'GameUserSettings.ini'))
-        if ok:
-            self._set_btn_blue(self.apply_gfx_btn)
         self._show_info(self.t('gfx'), msg) if ok else self._show_error(msg)
 
     def _restore_graphics(self):
         ok, msg = restore_settings()
-        if ok:
-            self._set_btn_gray(self.apply_gfx_btn)
         self._show_info(self.t('gfx'), msg) if ok else self._show_error(msg)
 
-    # ── True Stretch ──
+    # ─────────────────────────────────────
+    #  Stretch
+    # ─────────────────────────────────────
     def _build_res_options(self):
-        """Build resolution dropdown options."""
-        options = []
+        opts = []
         for k, v in STRETCH_RESOLUTIONS.items():
-            if k == 'custom':
-                options.append("Custom")
-            else:
-                options.append(f"{v['label']}  —  {v['desc']}")
-        return options
+            opts.append("Custom" if k == 'custom'
+                        else f"{v['label']}  —  {v['desc']}")
+        return opts
 
     def _toggle_stretch_link(self):
-        """Toggle whether stretch is linked to Play button."""
         self.stretch_linked = not self.stretch_linked
-        if self.stretch_linked:
-            self.link_btn.configure(fg_color=BLUE, hover_color=BLUE_HOVER)
-            self._log("Stretch linked — will apply when you press Play")
-        else:
-            self.link_btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
-            self._log("Stretch unlinked — Play will only apply mods")
+        self._log("Stretch linked — applies on Play"
+                  if self.stretch_linked else "Stretch unlinked")
 
     def _on_res_change(self, choice):
-        """Show/hide custom resolution input based on dropdown selection."""
-        if choice == "Custom":
-            self.custom_res_frame.pack(fill="x", padx=12, pady=(0, 4))
-        else:
-            self.custom_res_frame.pack_forget()
+        self.custom_res_widget.setVisible(choice == "Custom")
 
     def _get_selected_resolution_key(self):
-        """Map dropdown selection back to resolution key."""
-        selected = self.res_menu.get()
+        selected = self.res_combo.currentText()
         if selected == "Custom":
             return "custom"
         for k, v in STRETCH_RESOLUTIONS.items():
@@ -829,129 +774,87 @@ class MainWindow(ctk.CTk):
 
     def _apply_stretch(self):
         res_key = self._get_selected_resolution_key()
-        custom_w, custom_h = 0, 0
-
+        cw, ch = 0, 0
         if res_key == "custom":
             try:
-                custom_w = int(self.custom_w_entry.get())
-                custom_h = int(self.custom_h_entry.get())
+                cw = int(self.custom_w_entry.text())
+                ch = int(self.custom_h_entry.text())
             except ValueError:
-                self._log("Invalid custom resolution — enter numbers only")
-                return
-            if custom_w < 640 or custom_h < 480:
-                self._log("Resolution too small (min 640x480)")
-                return
-            self._log(f"Applying custom stretch: {custom_w}x{custom_h}")
+                self._log("Invalid custom resolution"); return
+            if cw < 640 or ch < 480:
+                self._log("Resolution too small (min 640x480)"); return
+            self._log(f"Applying custom stretch: {cw}x{ch}")
         else:
             self._log(f"Applying stretch: {res_key}")
 
-        ok, nw, nh = apply_stretch(res_key, self._log, custom_w, custom_h)
-
-        # Resolution not in NVIDIA's mode list — show tutorial popup
+        ok, nw, nh = apply_stretch(res_key, self._log, cw, ch)
         if ok == "needs_custom_res":
-            target_w = custom_w if res_key == "custom" else STRETCH_RESOLUTIONS[res_key]['w']
-            target_h = custom_h if res_key == "custom" else STRETCH_RESOLUTIONS[res_key]['h']
-            self._show_nvidia_tutorial(target_w, target_h)
+            tw = cw if res_key == "custom" else STRETCH_RESOLUTIONS[res_key]['w']
+            th = ch if res_key == "custom" else STRETCH_RESOLUTIONS[res_key]['h']
+            self._show_nvidia_tutorial(tw, th)
             return
-
         if ok:
             self.native_w, self.native_h = nw, nh
             self.stretch_active = True
-            self._set_btn_blue(self.stretch_btn)
-            # Save last used resolution + custom values
             self.config['last_resolution'] = res_key
             if res_key == 'custom':
-                self.config['custom_width'] = str(custom_w)
-                self.config['custom_height'] = str(custom_h)
+                self.config['custom_width'] = str(cw)
+                self.config['custom_height'] = str(ch)
             save_config(self.config)
             self._log("Restart VALORANT for changes to take effect")
         else:
             self._log("Stretch failed")
 
     def _save_custom_resolution(self):
-        """Save custom resolution to config without applying."""
         try:
-            w = int(self.custom_w_entry.get())
-            h = int(self.custom_h_entry.get())
+            w, h = int(self.custom_w_entry.text()), int(self.custom_h_entry.text())
         except ValueError:
-            self._log("Invalid — enter numbers only")
-            return
+            self._log("Invalid — enter numbers only"); return
         if w < 640 or h < 480:
-            self._log("Too small (min 640x480)")
-            return
+            self._log("Too small (min 640x480)"); return
         self.config['custom_width'] = str(w)
         self.config['custom_height'] = str(h)
         save_config(self.config)
         self._log(f"Saved custom: {w}x{h}")
-        self._set_btn_blue(self.save_custom_btn)
-        self.after(1200, lambda: self._set_btn_gray(self.save_custom_btn))
 
     def _show_nvidia_tutorial(self, width, height):
-        """Popup tutorial for adding a custom resolution in NVIDIA Control Panel."""
-        popup = ctk.CTkToplevel(self)
-        popup.title("One-Time Setup Required")
-        popup.geometry("520x400")
-        popup.configure(fg_color="#0d0d0d")
-        popup.transient(self)
-        popup.grab_set()
-        popup.resizable(False, False)
-
-        title = ctk.CTkLabel(popup, text="Custom Resolution Setup",
-                              font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
-                              text_color="#ffffff")
-        title.pack(pady=(20, 6))
-
-        subtitle = ctk.CTkLabel(popup,
-                                 text=f"Resolution {width}x{height} not in your display mode list",
-                                 font=ctk.CTkFont(family="Segoe UI", size=11),
-                                 text_color=RED)
-        subtitle.pack(pady=(0, 10))
-
-        steps = (
+        from PyQt6.QtWidgets import QDialog
+        dlg = QDialog(self)
+        dlg.setWindowTitle("One-Time Setup Required")
+        dlg.setFixedSize(520, 420)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(12)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.addWidget(TitleLabel("Custom Resolution Setup"))
+        sub = CaptionLabel(f"Resolution {width}x{height} not in display mode list")
+        sub.setStyleSheet("color: #ef4444;")
+        lay.addWidget(sub)
+        lay.addWidget(BodyLabel(
             "One-time setup in NVIDIA Control Panel:\n\n"
             "1. Click \"Open NVIDIA CP\" below\n"
             "2. Go to:  Display  >  Change Resolution\n"
-            "3. Click the \"Customize...\" button\n"
+            "3. Click \"Customize...\"\n"
             "4. Check \"Enable resolutions not exposed by the display\"\n"
             "5. Click \"Create Custom Resolution\"\n"
             f"6. Set Horizontal pixels: {width}\n"
             f"7. Set Vertical lines: {height}\n"
-            "8. Click Test, then OK to save\n"
-            "9. Come back and click Apply Stretch again"
-        )
-
-        steps_label = ctk.CTkLabel(popup, text=steps,
-                                    font=ctk.CTkFont(family="Segoe UI", size=11),
-                                    text_color="#bbbbbb", justify="left")
-        steps_label.pack(padx=24, pady=(0, 12))
-
-        btn_row = ctk.CTkFrame(popup, fg_color="transparent")
-        btn_row.pack(pady=(0, 20))
-
-        open_btn = ctk.CTkButton(btn_row, text="Open NVIDIA CP", width=150, height=36,
-                                  fg_color=BLUE, hover_color=BLUE_HOVER,
-                                  font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                                  command=lambda: self._open_nvcp_and_log(popup))
-        open_btn.pack(side="left", padx=6)
-
-        close_btn = ctk.CTkButton(btn_row, text="Close", width=100, height=36,
-                                   fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                   font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                                   command=popup.destroy)
-        close_btn.pack(side="left", padx=6)
-
-    def _open_nvcp_and_log(self, popup):
-        ok, msg = open_nvidia_control_panel()
-        self._log(msg)
-        if popup:
-            popup.destroy()
+            "8. Click Test, then OK\n"
+            "9. Come back and click Apply Stretch again"))
+        br = QHBoxLayout()
+        ob = PrimaryPushButton("Open NVIDIA CP")
+        ob.clicked.connect(lambda: (self._log(open_nvidia_control_panel()[1]), dlg.close()))
+        br.addWidget(ob)
+        cb = PushButton("Close")
+        cb.clicked.connect(dlg.close)
+        br.addWidget(cb)
+        lay.addLayout(br)
+        dlg.exec()
 
     def _revert_stretch(self):
         self._log("Reverting stretch...")
         ok = revert_stretch(self.native_w, self.native_h, self._log)
         if ok:
             self.stretch_active = False
-            self._set_btn_gray(self.stretch_btn)
             self._log("Reverted — restart VALORANT for changes")
         else:
             self._log("Nothing to revert")
