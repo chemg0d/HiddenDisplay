@@ -28,57 +28,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+
+      - name: Update version in source
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.tag_version.outputs.new_version }}"
+          $content = Get-Content src/main_window.py -Raw
+          $content = $content -replace 'APP_VERSION\s*=\s*"[^"]+"', "APP_VERSION = `"$ver`""
+          $content | Set-Content src/main_window.py
+
       - name: Build with PyInstaller
         run: |
           pyinstaller build.spec --clean --noconfirm
 
-      - name: Get Version
-        id: get_version
-        shell: pwsh
-        run: |
-          $content = Get-Content src/main_window.py -Raw
-          if ($content -match 'APP_VERSION\s*=\s*\"([^\"]+)\"') {
-              $version = $Matches[1]
-              echo "VERSION=$version" >> $env:GITHUB_ENV
-              echo "tag=v$version" >> $env:GITHUB_OUTPUT
-          } else {
-              Write-Error "Could not find APP_VERSION in src/main_window.py"
-              exit 1
-          }
-
-      - name: Check if tag exists
-        id: check_tag
-        shell: pwsh
-        run: |
-          $tag_exists = git tag -l "v${{ env.VERSION }}"
-          if ($tag_exists) {
-            echo "exists=true" >> $env:GITHUB_OUTPUT
-          } else {
-            echo "exists=false" >> $env:GITHUB_OUTPUT
-          }
-
-      - name: Create Tag
-        if: steps.check_tag.outputs.exists == 'false'
-        shell: pwsh
-        run: |
-          git tag "v${{ env.VERSION }}"
-          git push origin "v${{ env.VERSION }}"
-
       - name: Zip Release
-        if: steps.check_tag.outputs.exists == 'false'
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/HiddenDisplay -DestinationPath "dist/HiddenDisplay-v${{ env.VERSION }}.zip"
+          Compress-Archive -Path dist/HiddenDisplay -DestinationPath "dist/HiddenDisplay-${{ steps.tag_version.outputs.new_tag }}.zip"
 
       - name: Create Release
-        if: steps.check_tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          name: HiddenDisplay v${{ env.VERSION }}
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: HiddenDisplay ${{ steps.tag_version.outputs.new_tag }}
           draft: false
           prerelease: false
-          files: dist/HiddenDisplay-v${{ env.VERSION }}.zip
+          files: dist/HiddenDisplay-${{ steps.tag_version.outputs.new_tag }}.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
