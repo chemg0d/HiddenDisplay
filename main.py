@@ -54,8 +54,11 @@ def main():
         sys.exit(0)
 
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
 
+    # Enable high DPI scaling
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
 
     from src.main_window import MainWindow
     window = MainWindow()
