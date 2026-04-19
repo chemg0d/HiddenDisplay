@@ -34,25 +34,32 @@ jobs:
 
       - name: Get Version
         id: get_version
-        shell: bash
+        shell: pwsh
         run: |
-          VERSION=$(grep -oP "APP_VERSION\s*=\s*\"\K[^\"]+" src/main_window.py)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          $content = Get-Content src/main_window.py -Raw
+          if ($content -match 'APP_VERSION\s*=\s*\"([^\"]+)\"') {
+              $version = $Matches[1]
+              echo "VERSION=$version" >> $env:GITHUB_ENV
+              echo "tag=v$version" >> $env:GITHUB_OUTPUT
+          } else {
+              Write-Error "Could not find APP_VERSION in src/main_window.py"
+              exit 1
+          }
 
       - name: Check if tag exists
         id: check_tag
-        shell: bash
+        shell: pwsh
         run: |
-          if git rev-parse "v${{ env.VERSION }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+          git rev-parse "v${{ env.VERSION }}"
+          if ($LASTEXITCODE -eq 0) {
+            echo "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "exists=false" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Create Tag
         if: steps.check_tag.outputs.exists == 'false'
-        shell: bash
+        shell: pwsh
         run: |
           git tag "v${{ env.VERSION }}"
           git push origin "v${{ env.VERSION }}"
