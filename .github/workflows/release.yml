@@ -50,7 +50,8 @@ jobs:
         id: check_tag
         shell: pwsh
         run: |
-          git rev-parse "v${{ env.VERSION }}"
+          $ErrorActionPreference = 'Continue'
+          git rev-parse "v${{ env.VERSION }}" 2>$null
           if ($LASTEXITCODE -eq 0) {
             echo "exists=true" >> $env:GITHUB_OUTPUT
           } else {
