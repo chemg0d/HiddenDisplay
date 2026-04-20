@@ -1,6 +1,6 @@
 ================================================================
 HIDDENDISPLAY — PROJECT FLOW DOCUMENTATION (ENGLISH)
-Last Updated: 2026-04-13
+Last Updated: 2026-04-18
 ================================================================
 
 TABLE OF CONTENTS
@@ -10,9 +10,10 @@ TABLE OF CONTENTS
   4. True Stretch Flow
   5. Mod Injection & Anti-Ban Cleanup
   6. Auto-Revert on Game Exit
-  7. Config Management
-  8. File Structure
-  9. Security & Risk Summary
+  7. NVIDIA Profile Flow
+  8. Config Management
+  9. File Structure
+  10. Security & Risk Summary
 
 
 ================================================================
@@ -60,6 +61,16 @@ D. FPS Optimization
 E. Low Graphics Preset
    - Replaces GameUserSettings.ini with pre-configured low-quality preset
    - Applied to all VALORANT accounts
+
+F. NVIDIA Profile (via bundled NPI)
+   - Modifies VALORANT's NVIDIA driver profile with 4 LOD presets:
+     Low (+1), Medium (+2), High (+3), ValoCraft :) (+15)
+   - Sets Antialiasing - Transparency Supersampling = AA_MODE_REPLAY_MODE_ALL
+   - Sets Texture filtering - Driver Controlled LOD Bias = OFF
+   - Sets Texture filtering - LOD Bias = preset value
+   - Uses a patched nvidiaProfileInspector.exe bundled inside HD
+     that finds the profile by executable name (handles both
+     existing "Valorant" profile and _GLOBAL_DRIVER_PROFILE fallback)
 
 
 ================================================================
@@ -221,7 +232,55 @@ This split fixes the "Show Mature Content" loop:
 
 
 ================================================================
-7. CONFIG MANAGEMENT
+7. NVIDIA PROFILE FLOW
+================================================================
+
+User picks LOD preset (Low/Medium/High/ValoCraft :) and clicks Apply.
+
+STEP 1: HD resolves bundled NPI path
+  - Frozen exe: sys._MEIPASS/bin/npi/nvidiaProfileInspector.exe
+  - Source run: BASE_DIR/bin/npi/nvidiaProfileInspector.exe
+
+STEP 2: HD builds CLI args
+  - -applyExe VALORANT-Win64-Shipping.exe Valorant
+    0x10D48A85=0x00000008   (Transparency Supersampling = ALL)
+    0x00638E8F=0x00000000   (Driver Controlled LOD Bias = OFF)
+    0x00738E8F=<preset>     (LOD Bias = 0x08/0x10/0x18/0x78)
+
+STEP 3: HD runs NPI via subprocess
+  - creationflags = CREATE_NO_WINDOW (0x08000000) — no console flash
+  - Timeout 30s, capture stdout/stderr
+
+STEP 4: NPI (patched -applyExe handler)
+  - Calls DrsSettingsService.GetProfileNameByExeName(exe)
+  - If returns a name (e.g., "Valorant"):
+      use that profile
+  - If returns empty (exe only in _GLOBAL_DRIVER_PROFILE):
+      CreateProfile("Valorant", exe)    // creates + adds exe
+      use "Valorant"
+  - For each setting: SetDwordValueToProfile(profile, id, value)
+    which internally opens a DRS session and SaveSettings
+  - Prints "Applied to profile: <name>" to stdout, exit 0
+
+STEP 5: HD logs the result
+  - Success: log "Applied NVIDIA profile (preset) — Applied to profile: X"
+  - Failure: log NPI's stderr/stdout
+
+STEP 6: UI feedback
+  - Apply button turns blue for 1.5s, then back to gray
+
+Why patched NPI (vs. plain -silentImport)?
+  - Plain .nip import matches profiles by NAME.
+  - If the .nip says "VALORANT" but NVIDIA's profile is "Valorant",
+    NPI creates a duplicate profile, then fails to add the exe
+    (already in use by the real "Valorant" profile), then rolls
+    back — settings never applied.
+  - -applyExe matches by EXECUTABLE instead, so whatever name
+    NVIDIA uses for the profile is the one we update.
+
+
+================================================================
+8. CONFIG MANAGEMENT
 ================================================================
 
 config.json (next to HiddenDisplay.exe) stores:
@@ -244,7 +303,7 @@ On first run:
 
 
 ================================================================
-8. FILE STRUCTURE
+9. FILE STRUCTURE
 ================================================================
 
 HiddenDisplay/
@@ -260,7 +319,7 @@ HiddenDisplay/
 
 
 ================================================================
-9. SECURITY & RISK SUMMARY
+10. SECURITY & RISK SUMMARY
 ================================================================
 
 Ban risk breakdown:

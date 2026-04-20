@@ -1,6 +1,6 @@
 ================================================================
 HIDDENDISPLAY — TÀI LIỆU LUỒNG HOẠT ĐỘNG (TIẾNG VIỆT)
-Cập nhật lần cuối: 13-04-2026
+Cập nhật lần cuối: 18-04-2026
 ================================================================
 
 MỤC LỤC
@@ -10,9 +10,10 @@ MỤC LỤC
   4. Luồng True Stretch
   5. Inject Mod và dọn dẹp chống ban
   6. Tự động hoàn tác khi thoát game
-  7. Quản lý Config
-  8. Cấu trúc file
-  9. Tóm tắt bảo mật và rủi ro
+  7. Luồng NVIDIA Profile
+  8. Quản lý Config
+  9. Cấu trúc file
+  10. Tóm tắt bảo mật và rủi ro
 
 
 ================================================================
@@ -60,6 +61,16 @@ D. Tối ưu FPS
 E. Preset đồ họa thấp
    - Thay GameUserSettings.ini bằng preset chất lượng thấp
    - Áp dụng cho mọi tài khoản VALORANT
+
+F. NVIDIA Profile (dùng NPI đã bundle)
+   - Chỉnh profile driver NVIDIA của VALORANT với 4 preset LOD:
+     Low (+1), Medium (+2), High (+3), ValoCraft :) (+15)
+   - Đặt Antialiasing - Transparency Supersampling = AA_MODE_REPLAY_MODE_ALL
+   - Đặt Texture filtering - Driver Controlled LOD Bias = OFF
+   - Đặt Texture filtering - LOD Bias = giá trị preset
+   - Dùng nvidiaProfileInspector.exe (đã patch) bundle trong HD,
+     tìm profile theo tên executable (xử lý cả profile "Valorant"
+     đã có sẵn lẫn trường hợp exe chỉ nằm trong _GLOBAL_DRIVER_PROFILE)
 
 
 ================================================================
@@ -221,7 +232,55 @@ Việc tách này giải quyết lỗi loop "Show Mature Content":
 
 
 ================================================================
-7. QUẢN LÝ CONFIG
+7. LUỒNG NVIDIA PROFILE
+================================================================
+
+Người dùng chọn preset LOD (Low/Medium/High/ValoCraft :) và bấm Apply.
+
+BƯỚC 1: HD xác định đường dẫn NPI đã bundle
+  - Exe đóng gói: sys._MEIPASS/bin/npi/nvidiaProfileInspector.exe
+  - Chạy source:  BASE_DIR/bin/npi/nvidiaProfileInspector.exe
+
+BƯỚC 2: HD dựng tham số CLI
+  - -applyExe VALORANT-Win64-Shipping.exe Valorant
+    0x10D48A85=0x00000008   (Transparency Supersampling = ALL)
+    0x00638E8F=0x00000000   (Driver Controlled LOD Bias = OFF)
+    0x00738E8F=<preset>     (LOD Bias = 0x08/0x10/0x18/0x78)
+
+BƯỚC 3: HD gọi NPI qua subprocess
+  - creationflags = CREATE_NO_WINDOW (0x08000000) — không nhấp console
+  - Timeout 30s, capture stdout/stderr
+
+BƯỚC 4: NPI (handler -applyExe đã patch)
+  - Gọi DrsSettingsService.GetProfileNameByExeName(exe)
+  - Nếu có tên (ví dụ "Valorant"):
+      dùng profile đó
+  - Nếu rỗng (exe chỉ nằm trong _GLOBAL_DRIVER_PROFILE):
+      CreateProfile("Valorant", exe)    // tạo + thêm exe
+      dùng "Valorant"
+  - Với mỗi setting: SetDwordValueToProfile(profile, id, value)
+    (mở DRS session + SaveSettings bên trong)
+  - In "Applied to profile: <tên>" ra stdout, exit 0
+
+BƯỚC 5: HD log kết quả
+  - Thành công: log "Applied NVIDIA profile (preset) — Applied to profile: X"
+  - Lỗi: log stderr/stdout của NPI
+
+BƯỚC 6: Phản hồi UI
+  - Nút Apply đổi màu xanh trong 1.5s, sau đó quay lại xám
+
+Tại sao phải patch NPI (thay vì dùng -silentImport)?
+  - Import .nip mặc định so khớp profile theo TÊN.
+  - Nếu .nip ghi "VALORANT" nhưng profile NVIDIA thực là "Valorant",
+    NPI sẽ tạo profile trùng lặp, rồi thất bại khi thêm exe (exe đã
+    được "Valorant" thật sử dụng), rồi rollback — setting không
+    bao giờ được áp dụng.
+  - -applyExe so khớp theo EXECUTABLE, nên dù NVIDIA đặt tên
+    profile là gì đi nữa thì ta vẫn cập nhật đúng profile đó.
+
+
+================================================================
+8. QUẢN LÝ CONFIG
 ================================================================
 
 config.json (cùng thư mục với HiddenDisplay.exe) lưu:
@@ -244,7 +303,7 @@ Lần chạy đầu:
 
 
 ================================================================
-8. CẤU TRÚC FILE
+9. CẤU TRÚC FILE
 ================================================================
 
 HiddenDisplay/
@@ -260,7 +319,7 @@ HiddenDisplay/
 
 
 ================================================================
-9. TÓM TẮT BẢO MẬT VÀ RỦI RO
+10. TÓM TẮT BẢO MẬT VÀ RỦI RO
 ================================================================
 
 Phân tích rủi ro ban:

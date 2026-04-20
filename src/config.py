@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
     'custom_width': '',
     'custom_height': '',
     'last_resolution': '',
+    'gpu_notif_no_nvidia_shown': False,
+    'gpu_notif_hybrid_shown': False,
+    'gpu_override': 'auto',
+    'welcome_shown': False,
 }
 
 

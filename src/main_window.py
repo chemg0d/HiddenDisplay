@@ -14,13 +14,13 @@ except ImportError:
     TRAY_AVAILABLE = False
 
 from src.config import load_config, save_config, BIN_DIR
-from src.fps_optimizer import run_all_optimizations, is_admin, create_restore_point
-from src.graphics_preset import apply_low_preset, restore_settings
 from src.game_launcher import GameLaunchWorker, find_riot_client, emergency_cleanup, is_game_running
 from src.stretch import (
     STRETCH_RESOLUTIONS, apply_stretch, revert_stretch, auto_revert_on_exit,
     get_native_resolution, is_resolution_supported, open_nvidia_control_panel
 )
+from src.nvidia_profile import apply_valorant_profile
+from src.gpu_detect import detect_gpus, get_gpu_category
 
 APP_VERSION = "4.0.0"
 APP_NAME = "HiddenDisplay"
@@ -43,13 +43,14 @@ GRAY_BTN = "#2a2a2a"
 GRAY_HOVER = "#3a3a3a"
 RED = "#ef4444"
 GREEN = "#22c55e"
+YELLOW = "#eab308"
 DIM = "#666666"
 
 # ── Translations ──
 LANG = {
     'en': {
         'mods': 'MODS',
-        'blood': 'Enable Blood & Corpse',
+        'blood': 'Show Mature Content',
         'vng': 'Remove VNG Logo',
         'launch': 'LAUNCH',
         'play': 'PLAY VALORANT',
@@ -58,23 +59,11 @@ LANG = {
         'riot_not_found': 'Riot Client not found — click Browse to locate',
         'riot_browse': 'Browse',
         'log': 'LOG',
-        'optimization': 'OPTIMIZATION',
-        'fps': 'FPS Boost',
-        'optimize': 'Optimize',
-        'gfx': 'Graphics Quality',
-        'apply_low': 'Apply Low',
-        'restore': 'Restore',
         'game_folder': 'GAME FOLDER',
         'browse': 'Browse',
         'auto_detected': 'Auto-detected',
         'custom_path': 'Custom path set',
         'path_not_found': 'Path not found',
-        'fps_confirm': 'This will create a restore point, then apply system optimizations.\n\nContinue?',
-        'fps_title': 'FPS Optimization',
-        'creating_rp': 'Creating restore point...',
-        'applying_opt': 'Applying optimizations...',
-        'restart_pc': 'Restart PC for full effect.',
-        'results': 'Results',
         'no_mods': 'Launched VALORANT (no mods)',
         'error': 'Error',
         'riot_err': 'Riot Client not found.',
@@ -89,10 +78,45 @@ LANG = {
         'apply_stretch': 'Apply Stretch',
         'revert_stretch': 'Revert',
         'stretch_hint': 'Modifies game config + sets read-only. Revert to undo.',
+        'other': 'OTHER',
+        'lod_preset': 'Graphic setting',
+        'apply_nvidia': 'Apply',
+        'nvidia_hint': 'Applies to VALORANT profile: Transparency Supersampling + LOD Bias.',
+        'gpu_no_nvidia_title': 'NVIDIA GPU Required',
+        'gpu_no_nvidia_msg': ('This tool only supports True Stretch and graphics-quality '
+                              'features on NVIDIA GPUs. Your system uses:\n\n{names}\n\n'
+                              'Those sections have been disabled.'),
+        'gpu_hybrid_title': 'Hybrid GPU Detected',
+        'gpu_hybrid_msg': ('Your device is running both GPUs:\n\n{names}\n\n'
+                           'Please switch to dGPU mode, or disable the Intel/AMD GPU '
+                           'in Device Manager > Display adapters, otherwise True Stretch '
+                           'and NVIDIA profile changes may not apply correctly.'),
+        'gpu_picker_title': 'GPU Mode',
+        'gpu_picker_subtitle': 'Detected GPU(s):',
+        'gpu_mode_auto': 'Auto-detect',
+        'gpu_mode_nvidia_only': 'NVIDIA only',
+        'gpu_mode_hybrid': 'Hybrid (NVIDIA + Intel/AMD)',
+        'gpu_mode_non_nvidia': 'Non-NVIDIA (Intel/AMD only)',
+        'gpu_picker_apply': 'Apply',
+        'gpu_picker_cancel': 'Cancel',
+        'gpu_picker_note': 'Manual override applies on next app start.',
+        'risk_blood': 'Ban risk: Very Low — file added/restored, no modifications to existing game files',
+        'risk_vng': 'Ban risk: Low — temporarily deletes logo file, auto-restored on game exit',
+        'risk_stretch': 'Ban risk: None — only modifies user config files',
+        'risk_nvidia': 'Ban risk: None — modifies NVIDIA driver settings only',
+        'welcome_title': 'Welcome to HiddenDisplay',
+        'welcome_thanks': 'Thank you for using our app!',
+        'welcome_body': ('We know some users may worry about ban risk when using this tool. '
+                         'That\'s why every feature now shows its own ban-risk label — '
+                         'please review them and use with confidence.'),
+        'welcome_follow': 'Follow us:',
+        'welcome_close': 'Got it',
+        'warning': 'USE AT YOUR OWN RISK',
+        'disclaimer': 'We take no responsibility for anything that happens to your account while using this tool.',
     },
     'vi': {
         'mods': 'TINH CHỈNH',
-        'blood': 'Hiển thị Máu & Xác',
+        'blood': 'Nội dung dành cho người lớn',
         'vng': 'Xóa Logo VNG',
         'launch': 'KHỞI ĐỘNG',
         'play': 'CHƠI VALORANT',
@@ -101,23 +125,11 @@ LANG = {
         'riot_not_found': 'Không tìm thấy Riot Client — nhấn Chọn để tìm',
         'riot_browse': 'Chọn',
         'log': 'NHẬT KÝ',
-        'optimization': 'TỐI ƯU',
-        'fps': 'Tăng FPS',
-        'optimize': 'Tối ưu',
-        'gfx': 'Chất lượng đồ họa',
-        'apply_low': 'Hạ thấp',
-        'restore': 'Khôi phục',
         'game_folder': 'THƯ MỤC GAME',
         'browse': 'Chọn',
         'auto_detected': 'Tự động phát hiện',
         'custom_path': 'Đã đặt đường dẫn',
         'path_not_found': 'Không tìm thấy',
-        'fps_confirm': 'Sẽ tạo điểm khôi phục và tối ưu hệ thống.\n\nTiếp tục?',
-        'fps_title': 'Tối ưu FPS',
-        'creating_rp': 'Đang tạo điểm khôi phục...',
-        'applying_opt': 'Đang tối ưu...',
-        'restart_pc': 'Khởi động lại máy tính để áp dụng.',
-        'results': 'Kết quả',
         'no_mods': 'Đã khởi động VALORANT (không mod)',
         'error': 'Lỗi',
         'riot_err': 'Không tìm thấy Riot Client.',
@@ -132,6 +144,41 @@ LANG = {
         'apply_stretch': 'Áp dụng Stretch',
         'revert_stretch': 'Hoàn tác',
         'stretch_hint': 'Chỉnh sửa config game + đặt chỉ đọc. Nhấn Hoàn tác để khôi phục.',
+        'other': 'KHÁC',
+        'lod_preset': 'Graphic setting',
+        'apply_nvidia': 'Áp dụng',
+        'nvidia_hint': 'Áp dụng cho profile VALORANT: Transparency Supersampling + LOD Bias.',
+        'gpu_no_nvidia_title': 'Yêu cầu GPU NVIDIA',
+        'gpu_no_nvidia_msg': ('Công cụ chỉ hỗ trợ True Stretch và chỉnh chất lượng đồ họa '
+                              'trên GPU NVIDIA. Hệ thống của bạn đang dùng:\n\n{names}\n\n'
+                              'Các mục đó đã bị vô hiệu hóa.'),
+        'gpu_hybrid_title': 'Phát hiện GPU Hybrid',
+        'gpu_hybrid_msg': ('Thiết bị của bạn đang chạy cả hai GPU:\n\n{names}\n\n'
+                           'Vui lòng chuyển sang chế độ dGPU, hoặc tắt GPU Intel/AMD '
+                           'trong Device Manager > Display adapters, nếu không True Stretch '
+                           'và thay đổi NVIDIA profile có thể không áp dụng đúng.'),
+        'gpu_picker_title': 'Chế độ GPU',
+        'gpu_picker_subtitle': 'GPU đã phát hiện:',
+        'gpu_mode_auto': 'Tự động phát hiện',
+        'gpu_mode_nvidia_only': 'Chỉ NVIDIA',
+        'gpu_mode_hybrid': 'Hybrid (NVIDIA + Intel/AMD)',
+        'gpu_mode_non_nvidia': 'Không phải NVIDIA (Intel/AMD)',
+        'gpu_picker_apply': 'Áp dụng',
+        'gpu_picker_cancel': 'Hủy',
+        'gpu_picker_note': 'Ghi đè thủ công sẽ có hiệu lực khi khởi động lại.',
+        'risk_blood': 'Rủi ro ban: Rất thấp — chỉ thêm file, không chỉnh sửa file gốc của game',
+        'risk_vng': 'Rủi ro ban: Thấp — tạm xóa file logo, tự khôi phục khi thoát game',
+        'risk_stretch': 'Rủi ro ban: Không — chỉ chỉnh file config của người dùng',
+        'risk_nvidia': 'Rủi ro ban: Không — chỉ chỉnh NVIDIA driver settings',
+        'welcome_title': 'Chào mừng đến HiddenDisplay',
+        'welcome_thanks': 'Cảm ơn bạn đã sử dụng ứng dụng của chúng tôi!',
+        'welcome_body': ('Chúng tôi biết một số bạn có thể lo ngại về rủi ro ban khi dùng tool. '
+                         'Vì vậy chúng tôi đã thêm nhãn rủi ro ban cho từng tính năng — '
+                         'bạn hãy kiểm tra và sử dụng với sự yên tâm.'),
+        'welcome_follow': 'Theo dõi chúng tôi:',
+        'welcome_close': 'Đã hiểu',
+        'warning': 'TỰ CHỊU RỦI RO KHI SỬ DỤNG',
+        'disclaimer': 'Chúng tôi không chịu trách nhiệm với những gì xảy ra với tài khoản của bạn khi sử dụng.',
     },
 }
 
@@ -144,6 +191,7 @@ class MainWindow(ctk.CTk):
         self.launch_worker = None
         self.stretch_active = False
         self.stretch_linked = False
+        self.other_linked = False
         self.native_w, self.native_h = 0, 0
         self.tray_icon = None
         self._build_ui()
@@ -152,6 +200,10 @@ class MainWindow(ctk.CTk):
         # Setup tray icon in background thread
         if TRAY_AVAILABLE:
             threading.Thread(target=self._setup_tray, daemon=True).start()
+        # First-run welcome popup
+        self.after(200, self._maybe_show_welcome)
+        # GPU detection + conditional disable/notify (runs after window is visible)
+        self.after(500, self._apply_gpu_policy)
 
     def _setup_tray(self):
         """Create system tray icon with Show/Quit menu."""
@@ -210,6 +262,203 @@ class MainWindow(ctk.CTk):
     def t(self, key):
         return LANG.get(self.lang, LANG['en']).get(key, key)
 
+    def _apply_gpu_policy(self):
+        """Detect GPU(s) and enable/disable stretch + other, show notifications.
+        Manual override from config.gpu_override takes precedence over auto-detection."""
+        self._detected_gpus = detect_gpus()
+        override = self.config.get('gpu_override', 'auto')
+        if override in ('nvidia_only', 'hybrid', 'non_nvidia'):
+            category = override
+            self._log(f"GPU mode (manual): {category}")
+        else:
+            category = get_gpu_category(self._detected_gpus)
+        gpus = self._detected_gpus
+        names_str = "\n".join("  - " + n for n in gpus['names']) or "  (none detected)"
+
+        if category == 'non_nvidia':
+            # Disable stretch and other sections entirely
+            for widget in (self.stretch_btn, self.revert_btn, self.res_menu,
+                           self.link_btn, self.custom_w_entry, self.custom_h_entry,
+                           self.save_custom_btn,
+                           self.apply_nvidia_btn, self.lod_menu, self.other_link_btn):
+                try:
+                    widget.configure(state="disabled")
+                except Exception:
+                    pass
+            self._log(f"Non-NVIDIA GPU detected: {', '.join(gpus['names'])}")
+            if not self.config.get('gpu_notif_no_nvidia_shown', False):
+                self._show_info(self.t('gpu_no_nvidia_title'),
+                                self.t('gpu_no_nvidia_msg').format(names=names_str))
+                self.config['gpu_notif_no_nvidia_shown'] = True
+                save_config(self.config)
+
+        elif category == 'hybrid':
+            self._log(f"Hybrid GPU setup: {', '.join(gpus['names'])}")
+            if not self.config.get('gpu_notif_hybrid_shown', False):
+                self._show_info(self.t('gpu_hybrid_title'),
+                                self.t('gpu_hybrid_msg').format(names=names_str))
+                self.config['gpu_notif_hybrid_shown'] = True
+                save_config(self.config)
+
+        elif category == 'nvidia_only':
+            self._log(f"NVIDIA GPU detected: {', '.join(gpus['names'])}")
+
+    def _maybe_show_welcome(self):
+        """Show one-time welcome popup on first run."""
+        if self.config.get('welcome_shown', False):
+            return
+        self._show_welcome_popup()
+        self.config['welcome_shown'] = True
+        save_config(self.config)
+
+    def _show_welcome_popup(self):
+        """Welcome popup shown in both EN and VI simultaneously."""
+        import webbrowser
+
+        en = LANG['en']
+        vi = LANG['vi']
+
+        popup = ctk.CTkToplevel(self)
+        popup.title("Welcome / Chào mừng")
+        popup.geometry("560x620")
+        popup.configure(fg_color="#0d0d0d")
+        popup.transient(self)
+        popup.grab_set()
+        popup.resizable(False, False)
+
+        title = ctk.CTkLabel(popup, text=f"{en['welcome_title']}  /  {vi['welcome_title']}",
+                              font=ctk.CTkFont(family="Segoe UI Semibold", size=16, weight="bold"),
+                              text_color="#ffffff")
+        title.pack(pady=(18, 4))
+
+        warning = ctk.CTkLabel(popup,
+                                text=f"{en['warning']}  /  {vi['warning']}",
+                                font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                                text_color=RED)
+        warning.pack(pady=(0, 10))
+
+        # English block
+        en_thanks = ctk.CTkLabel(popup, text="[EN] " + en['welcome_thanks'],
+                                  font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                                  text_color=BLUE)
+        en_thanks.pack(pady=(4, 2))
+        en_body = ctk.CTkLabel(popup, text=en['welcome_body'],
+                                font=ctk.CTkFont(family="Segoe UI", size=11),
+                                text_color="#bbbbbb", justify="left", wraplength=500)
+        en_body.pack(padx=24, pady=(0, 10))
+
+        sep1 = ctk.CTkFrame(popup, fg_color="#2a2a2a", height=1)
+        sep1.pack(fill="x", padx=24, pady=2)
+
+        # Vietnamese block
+        vi_thanks = ctk.CTkLabel(popup, text="[VI] " + vi['welcome_thanks'],
+                                  font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                                  text_color=BLUE)
+        vi_thanks.pack(pady=(8, 2))
+        vi_body = ctk.CTkLabel(popup, text=vi['welcome_body'],
+                                font=ctk.CTkFont(family="Segoe UI", size=11),
+                                text_color="#bbbbbb", justify="left", wraplength=500)
+        vi_body.pack(padx=24, pady=(0, 12))
+
+        sep2 = ctk.CTkFrame(popup, fg_color="#2a2a2a", height=1)
+        sep2.pack(fill="x", padx=24, pady=4)
+
+        follow = ctk.CTkLabel(popup,
+                               text=f"{en['welcome_follow']}  /  {vi['welcome_follow']}",
+                               font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                               text_color="#ffffff")
+        follow.pack(pady=(8, 4))
+
+        links = [
+            ("Discord",  "https://discord.com/invite/qyazsuHkk5"),
+            ("YouTube",  "https://www.youtube.com/@Longl%C3%A0Chem?sub_confirmation=1"),
+            ("TikTok",   "https://www.tiktok.com/@longtenlalongchem"),
+            ("TikTok 2", "https://www.tiktok.com/@longlachem"),
+        ]
+        for name, url in links:
+            link = ctk.CTkLabel(popup, text=f"  {name}:  {url}",
+                                 font=ctk.CTkFont(family="Segoe UI", size=10, underline=True),
+                                 text_color=BLUE, cursor="hand2")
+            link.pack(anchor="w", padx=30, pady=1)
+            link.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
+
+        close_btn = ctk.CTkButton(popup,
+                                    text=f"{en['welcome_close']}  /  {vi['welcome_close']}",
+                                    width=180, height=34,
+                                    fg_color=BLUE, hover_color=BLUE_HOVER,
+                                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                                    command=popup.destroy)
+        close_btn.pack(pady=(14, 16))
+
+    def _open_gpu_picker(self):
+        """Popup dialog to manually choose GPU mode."""
+        popup = ctk.CTkToplevel(self)
+        popup.title(self.t('gpu_picker_title'))
+        popup.geometry("440x360")
+        popup.configure(fg_color="#0d0d0d")
+        popup.transient(self)
+        popup.grab_set()
+        popup.resizable(False, False)
+
+        title = ctk.CTkLabel(popup, text=self.t('gpu_picker_title'),
+                              font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+                              text_color="#ffffff")
+        title.pack(pady=(20, 4))
+
+        detected = getattr(self, '_detected_gpus', None) or detect_gpus()
+        names_str = "\n".join(detected['names']) or "(none detected)"
+        subtitle = ctk.CTkLabel(popup, text=self.t('gpu_picker_subtitle'),
+                                 font=ctk.CTkFont(family="Segoe UI", size=10),
+                                 text_color=DIM)
+        subtitle.pack(pady=(6, 0))
+        names_label = ctk.CTkLabel(popup, text=names_str,
+                                    font=ctk.CTkFont(family="Segoe UI", size=11),
+                                    text_color="#bbbbbb", justify="left")
+        names_label.pack(pady=(0, 10))
+
+        import tkinter as tk
+        mode_var = tk.StringVar(value=self.config.get('gpu_override', 'auto'))
+
+        options = [
+            ('auto',         self.t('gpu_mode_auto')),
+            ('nvidia_only',  self.t('gpu_mode_nvidia_only')),
+            ('hybrid',       self.t('gpu_mode_hybrid')),
+            ('non_nvidia',   self.t('gpu_mode_non_nvidia')),
+        ]
+        for val, label in options:
+            rb = ctk.CTkRadioButton(popup, text=label, variable=mode_var, value=val,
+                                     font=ctk.CTkFont(family="Segoe UI", size=11),
+                                     fg_color=BLUE, hover_color=BLUE_HOVER)
+            rb.pack(anchor="w", padx=40, pady=2)
+
+        note = ctk.CTkLabel(popup, text=self.t('gpu_picker_note'),
+                             font=ctk.CTkFont(family="Segoe UI", size=9),
+                             text_color=DIM)
+        note.pack(pady=(10, 6))
+
+        btn_row = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_row.pack(pady=(0, 16))
+
+        def apply_choice():
+            self.config['gpu_override'] = mode_var.get()
+            save_config(self.config)
+            self._log(f"GPU override saved: {mode_var.get()}")
+            popup.destroy()
+
+        apply_btn = ctk.CTkButton(btn_row, text=self.t('gpu_picker_apply'),
+                                   width=100, height=32,
+                                   fg_color=BLUE, hover_color=BLUE_HOVER,
+                                   font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                                   command=apply_choice)
+        apply_btn.pack(side="left", padx=6)
+
+        cancel_btn = ctk.CTkButton(btn_row, text=self.t('gpu_picker_cancel'),
+                                    width=100, height=32,
+                                    fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
+                                    font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                                    command=popup.destroy)
+        cancel_btn.pack(side="left", padx=6)
+
     def _resolve_paks_dir(self, base_path):
         for sub in ('live/ShooterGame/Content/Paks', 'ShooterGame/Content/Paks'):
             p = os.path.join(base_path, sub)
@@ -253,10 +502,19 @@ class MainWindow(ctk.CTk):
         header_frame.grid_columnconfigure(0, weight=1)
         header_frame.grid_columnconfigure(1, weight=0)
         header_frame.grid_columnconfigure(2, weight=0)
+        header_frame.grid_columnconfigure(3, weight=0)
 
         title = ctk.CTkLabel(header_frame, text=APP_NAME,
                               font=ctk.CTkFont(family="Segoe UI Semibold", size=24, weight="bold"))
         title.grid(row=0, column=0, sticky="w")
+
+        self.gpu_btn = ctk.CTkButton(
+            header_frame, text="GPU", width=50, height=28,
+            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            command=self._open_gpu_picker
+        )
+        self.gpu_btn.grid(row=0, column=1, sticky="e", padx=(0, 6))
 
         self.lang_menu = ctk.CTkOptionMenu(
             header_frame, values=["EN", "VI"],
@@ -267,11 +525,16 @@ class MainWindow(ctk.CTk):
             command=self._change_language
         )
         self.lang_menu.set("VI" if self.lang == 'vi' else "EN")
-        self.lang_menu.grid(row=0, column=2, sticky="e")
+        self.lang_menu.grid(row=0, column=3, sticky="e")
 
         self.dev_label = ctk.CTkLabel(container, text=self.t('developed_by'),
                                        text_color=DIM, font=ctk.CTkFont(family="Segoe UI", size=11))
-        self.dev_label.pack(padx=20, anchor="w", pady=(0, 8))
+        self.dev_label.pack(padx=20, anchor="w", pady=(0, 2))
+
+        self.warning_label = ctk.CTkLabel(container, text="⚠  " + self.t('warning'),
+                                           text_color=RED,
+                                           font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"))
+        self.warning_label.pack(padx=20, anchor="w", pady=(0, 8))
 
         # ── Game Folder ──
         self.folder_label = ctk.CTkLabel(container, text=self.t('game_folder'),
@@ -312,7 +575,12 @@ class MainWindow(ctk.CTk):
                                           fg_color=BLUE, hover_color=BLUE_HOVER)
         if self.config.get('enable_blood', True):
             self.chk_blood.select()
-        self.chk_blood.pack(padx=16, pady=(12, 4), anchor="w")
+        self.chk_blood.pack(padx=16, pady=(12, 0), anchor="w")
+
+        self.risk_blood_label = ctk.CTkLabel(mods_frame, text=self.t('risk_blood'),
+                                              font=ctk.CTkFont(family="Segoe UI", size=9),
+                                              text_color=GREEN)
+        self.risk_blood_label.pack(padx=42, pady=(0, 6), anchor="w")
 
         self.chk_vng = ctk.CTkCheckBox(mods_frame, text=self.t('vng'),
                                         font=ctk.CTkFont(family="Segoe UI", size=13),
@@ -320,7 +588,12 @@ class MainWindow(ctk.CTk):
                                         fg_color=BLUE, hover_color=BLUE_HOVER)
         if self.config.get('enable_vng_remove', True):
             self.chk_vng.select()
-        self.chk_vng.pack(padx=16, pady=(4, 12), anchor="w")
+        self.chk_vng.pack(padx=16, pady=(4, 0), anchor="w")
+
+        self.risk_vng_label = ctk.CTkLabel(mods_frame, text=self.t('risk_vng'),
+                                            font=ctk.CTkFont(family="Segoe UI", size=9),
+                                            text_color=YELLOW)
+        self.risk_vng_label.pack(padx=42, pady=(0, 12), anchor="w")
 
         # ── Launch ──
         self.launch_label = ctk.CTkLabel(container, text=self.t('launch'),
@@ -366,55 +639,6 @@ class MainWindow(ctk.CTk):
                                        font=ctk.CTkFont(family="Consolas", size=11),
                                        text_color="#888888", state="disabled")
         self.log_box.pack(fill="x", padx=20, pady=(0, 6))
-
-        # ── Optimization ──
-        self.opt_label = ctk.CTkLabel(container, text=self.t('optimization'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
-        self.opt_label.pack(padx=20, anchor="w", pady=(8, 4))
-
-        opt_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
-        opt_frame.pack(fill="x", padx=20, pady=(0, 6))
-
-        # FPS row
-        fps_row = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        fps_row.pack(fill="x", padx=12, pady=(12, 6))
-
-        self.fps_label = ctk.CTkLabel(fps_row, text=self.t('fps'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12))
-        self.fps_label.pack(side="left")
-
-        self.opt_btn = ctk.CTkButton(fps_row, text=self.t('optimize'), width=90, height=32,
-                                      fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                      font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                      command=self._optimize_fps,
-                                      state="disabled")
-        self.opt_btn.pack(side="right")
-
-        # Separator
-        sep1 = ctk.CTkFrame(opt_frame, fg_color="#2a2a2a", height=1)
-        sep1.pack(fill="x", padx=12, pady=4)
-
-        # Graphics row
-        gfx_row = ctk.CTkFrame(opt_frame, fg_color="transparent")
-        gfx_row.pack(fill="x", padx=12, pady=(6, 12))
-
-        self.gfx_label = ctk.CTkLabel(gfx_row, text=self.t('gfx'),
-                                       font=ctk.CTkFont(family="Segoe UI", size=12))
-        self.gfx_label.pack(side="left")
-
-        self.restore_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('restore'), width=90, height=32,
-                                              fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                              font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                              command=self._restore_graphics,
-                                              state="disabled")
-        self.restore_gfx_btn.pack(side="right", padx=(6, 0))
-
-        self.apply_gfx_btn = ctk.CTkButton(gfx_row, text=self.t('apply_low'), width=90, height=32,
-                                            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
-                                            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                                            command=self._apply_graphics,
-                                            state="disabled")
-        self.apply_gfx_btn.pack(side="right")
 
         # ── True Stretch ──
         self.stretch_label = ctk.CTkLabel(container, text=self.t('stretch'),
@@ -522,14 +746,74 @@ class MainWindow(ctk.CTk):
                                          command=self._revert_stretch, width=90)
         self.revert_btn.pack(side="right")
 
-        stretch_hint = ctk.CTkLabel(stretch_frame,
+        self.stretch_hint_label = ctk.CTkLabel(stretch_frame,
                                      text=self.t('stretch_hint'),
                                      font=ctk.CTkFont(family="Segoe UI", size=9),
                                      text_color=DIM)
-        stretch_hint.pack(padx=12, anchor="w", pady=(0, 8))
+        self.stretch_hint_label.pack(padx=12, anchor="w", pady=(0, 2))
 
-        # Bottom padding
-        ctk.CTkLabel(container, text="", height=10).pack()
+        self.risk_stretch_label = ctk.CTkLabel(stretch_frame,
+                                                text=self.t('risk_stretch'),
+                                                font=ctk.CTkFont(family="Segoe UI", size=9),
+                                                text_color=GREEN)
+        self.risk_stretch_label.pack(padx=12, anchor="w", pady=(0, 8))
+
+        # ── Other (NVIDIA Profile) ──
+        self.nvidia_label = ctk.CTkLabel(container, text=self.t('other'),
+                                          font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"))
+        self.nvidia_label.pack(padx=20, anchor="w", pady=(8, 4))
+
+        nvidia_frame = ctk.CTkFrame(container, fg_color="#1a1a1a", corner_radius=8)
+        nvidia_frame.pack(fill="x", padx=20, pady=(0, 6))
+
+        nvidia_row = ctk.CTkFrame(nvidia_frame, fg_color="transparent")
+        nvidia_row.pack(fill="x", padx=12, pady=(12, 6))
+
+        self.lod_label = ctk.CTkLabel(nvidia_row, text=self.t('lod_preset'),
+                                       font=ctk.CTkFont(family="Segoe UI", size=12))
+        self.lod_label.pack(side="left")
+
+        self.apply_nvidia_btn = ctk.CTkButton(nvidia_row, text=self.t('apply_nvidia'),
+                                               width=90, height=30,
+                                               fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
+                                               font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                                               command=self._apply_nvidia_profile)
+        self.apply_nvidia_btn.pack(side="right")
+
+        self._lod_options = ["Low", "Medium", "High", "ValoCraft :)"]
+        self.lod_menu = ctk.CTkOptionMenu(
+            nvidia_row, values=self._lod_options, width=150, height=30,
+            fg_color=GRAY_BTN, button_color=GRAY_BTN, button_hover_color=GRAY_HOVER,
+            font=ctk.CTkFont(family="Segoe UI", size=11))
+        self.lod_menu.set("Low")
+        self.lod_menu.pack(side="right", padx=(0, 6))
+
+        # Link icon — toggles whether NVIDIA profile is applied when pressing Play
+        self.other_link_btn = ctk.CTkButton(
+            nvidia_row, image=self._link_img, text="",
+            width=30, height=30,
+            fg_color=GRAY_BTN, hover_color=GRAY_HOVER,
+            corner_radius=6,
+            command=self._toggle_other_link)
+        self.other_link_btn.pack(side="right", padx=(0, 6))
+
+        self.nvidia_hint_label = ctk.CTkLabel(nvidia_frame,
+                                    text=self.t('nvidia_hint'),
+                                    font=ctk.CTkFont(family="Segoe UI", size=9),
+                                    text_color=DIM)
+        self.nvidia_hint_label.pack(padx=12, anchor="w", pady=(0, 2))
+
+        self.risk_nvidia_label = ctk.CTkLabel(nvidia_frame,
+                                               text=self.t('risk_nvidia'),
+                                               font=ctk.CTkFont(family="Segoe UI", size=9),
+                                               text_color=GREEN)
+        self.risk_nvidia_label.pack(padx=12, anchor="w", pady=(0, 8))
+
+        # Disclaimer at bottom (follows current language)
+        self.disclaimer_label = ctk.CTkLabel(container, text=self.t('disclaimer'),
+                                              font=ctk.CTkFont(family="Segoe UI", size=10, slant="italic"),
+                                              text_color=DIM, wraplength=460, justify="center")
+        self.disclaimer_label.pack(padx=20, pady=(12, 14))
 
     # ── Language ──
     def _change_language(self, choice):
@@ -540,21 +824,19 @@ class MainWindow(ctk.CTk):
 
     def _refresh_texts(self):
         self.dev_label.configure(text=self.t('developed_by'))
+        self.warning_label.configure(text="⚠  " + self.t('warning'))
+        self.disclaimer_label.configure(text=self.t('disclaimer'))
         self.folder_label.configure(text=self.t('game_folder'))
         self.browse_btn.configure(text=self.t('browse'))
         self.mods_label.configure(text=self.t('mods'))
         self.chk_blood.configure(text=self.t('blood'))
         self.chk_vng.configure(text=self.t('vng'))
+        self.risk_blood_label.configure(text=self.t('risk_blood'))
+        self.risk_vng_label.configure(text=self.t('risk_vng'))
         self.launch_label.configure(text=self.t('launch'))
         self.launch_btn.configure(text=self.t('play'))
         self.riot_browse_btn.configure(text=self.t('riot_browse'))
         self.log_label.configure(text=self.t('log'))
-        self.opt_label.configure(text=self.t('optimization'))
-        self.fps_label.configure(text=self.t('fps'))
-        self.opt_btn.configure(text=self.t('optimize'))
-        self.gfx_label.configure(text=self.t('gfx'))
-        self.apply_gfx_btn.configure(text=self.t('apply_low'))
-        self.restore_gfx_btn.configure(text=self.t('restore'))
         custom_riot = self.config.get('riot_client_path', '')
         riot = find_riot_client(custom_riot)
         self.riot_label.configure(
@@ -569,6 +851,15 @@ class MainWindow(ctk.CTk):
         self._res_options = self._build_res_options()
         self.res_menu.configure(values=self._res_options)
         self.res_menu.set(self._res_options[0])
+        # Stretch hint + risk
+        self.stretch_hint_label.configure(text=self.t('stretch_hint'))
+        self.risk_stretch_label.configure(text=self.t('risk_stretch'))
+        # Other (NVIDIA Profile)
+        self.nvidia_label.configure(text=self.t('other'))
+        self.lod_label.configure(text=self.t('lod_preset'))
+        self.apply_nvidia_btn.configure(text=self.t('apply_nvidia'))
+        self.nvidia_hint_label.configure(text=self.t('nvidia_hint'))
+        self.risk_nvidia_label.configure(text=self.t('risk_nvidia'))
 
     # ── Game Folder ──
     def _browse_folder(self):
@@ -645,6 +936,21 @@ class MainWindow(ctk.CTk):
                     save_config(self.config)
             except Exception as e:
                 self._log(f"Stretch error: {e}")
+
+        # Apply NVIDIA profile only if user linked Other to Play
+        if self.other_linked:
+            label_to_key = {
+                "Low": "low", "Medium": "medium",
+                "High": "high", "ValoCraft :)": "valocraft",
+            }
+            selected = self.lod_menu.get()
+            lod_key = label_to_key.get(selected, "low")
+            self._log(f"Applying NVIDIA profile ({selected})...")
+            try:
+                ok, msg = apply_valorant_profile(lod_key)
+                self._log(msg)
+            except Exception as e:
+                self._log(f"NVIDIA profile error: {e}")
 
         paks_dir = self._get_paks_dir()
         custom_riot = self.config.get('riot_client_path', '')
@@ -746,48 +1052,12 @@ class MainWindow(ctk.CTk):
         from tkinter import messagebox
         return messagebox.askyesno(title, msg)
 
-    # ── Optimization ──
+    # ── Button colors ──
     def _set_btn_blue(self, btn):
         btn.configure(fg_color=BLUE, hover_color=BLUE_HOVER)
 
     def _set_btn_gray(self, btn):
         btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
-
-    def _optimize_fps(self):
-        if not self._ask_yes_no(self.t('fps_title'), self.t('fps_confirm')):
-            return
-
-        self._log(self.t('creating_rp'))
-        create_restore_point()
-
-        self._log(self.t('applying_opt'))
-        paks_dir = self._get_paks_dir()
-        exe_path = None
-        if paks_dir:
-            exe = os.path.normpath(os.path.join(paks_dir, '..', '..', 'Binaries', 'Win64',
-                                                 'VALORANT-Win64-Shipping.exe'))
-            if os.path.exists(exe):
-                exe_path = exe
-
-        results = run_all_optimizations(exe_path)
-        ok_count = sum(1 for ok, _ in results.values() if ok)
-        details = [f"  [{'OK' if ok else 'FAIL'}] {n}: {m}" for n, (ok, m) in results.items()]
-        if ok_count > 0:
-            self._set_btn_blue(self.opt_btn)
-        self._show_info(self.t('results'),
-            f"{ok_count}/{len(results)} applied:\n\n" + "\n".join(details) + f"\n\n{self.t('restart_pc')}")
-
-    def _apply_graphics(self):
-        ok, msg = apply_low_preset(os.path.join(BIN_DIR, 'GameUserSettings.ini'))
-        if ok:
-            self._set_btn_blue(self.apply_gfx_btn)
-        self._show_info(self.t('gfx'), msg) if ok else self._show_error(msg)
-
-    def _restore_graphics(self):
-        ok, msg = restore_settings()
-        if ok:
-            self._set_btn_gray(self.apply_gfx_btn)
-        self._show_info(self.t('gfx'), msg) if ok else self._show_error(msg)
 
     # ── True Stretch ──
     def _build_res_options(self):
@@ -809,6 +1079,16 @@ class MainWindow(ctk.CTk):
         else:
             self.link_btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
             self._log("Stretch unlinked — Play will only apply mods")
+
+    def _toggle_other_link(self):
+        """Toggle whether NVIDIA profile is linked to Play button."""
+        self.other_linked = not self.other_linked
+        if self.other_linked:
+            self.other_link_btn.configure(fg_color=BLUE, hover_color=BLUE_HOVER)
+            self._log("NVIDIA profile linked — will apply when you press Play")
+        else:
+            self.other_link_btn.configure(fg_color=GRAY_BTN, hover_color=GRAY_HOVER)
+            self._log("NVIDIA profile unlinked — Play will skip it")
 
     def _on_res_change(self, choice):
         """Show/hide custom resolution input based on dropdown selection."""
@@ -945,6 +1225,24 @@ class MainWindow(ctk.CTk):
         self._log(msg)
         if popup:
             popup.destroy()
+
+    # ── NVIDIA Profile ──
+    def _apply_nvidia_profile(self):
+        """Apply NVIDIA settings to VALORANT profile via NPI."""
+        label_to_key = {
+            "Low": "low",
+            "Medium": "medium",
+            "High": "high",
+            "ValoCraft :)": "valocraft",
+        }
+        selected = self.lod_menu.get()
+        lod_key = label_to_key.get(selected, "low")
+        self._log(f"Applying NVIDIA profile ({selected})...")
+        ok, msg = apply_valorant_profile(lod_key)
+        self._log(msg)
+        if ok:
+            self._set_btn_blue(self.apply_nvidia_btn)
+            self.after(1500, lambda: self._set_btn_gray(self.apply_nvidia_btn))
 
     def _revert_stretch(self):
         self._log("Reverting stretch...")
